@@ -1,0 +1,36 @@
+[workspace]
+members = [
+  "crates/*",
+  "cli",
+]
+
+[profile.release]
+debug = 1
+
+[workspace.dependencies]
+nq-speedtests = { path = "./crates/speedtests" }
+nq-io = { path = "./crates/io" }
+nq-stats = { path = "./crates/stats" }
+
+anyhow = "1.0"
+async-trait = { version = "0.1"}
+boring = { git = "https://github.com/cloudflare/boring", rev = "09d92e54fc5e65511de63f22713428cd729237d9" }
+clap = "4.3"
+http = "0.2"
+hyper = { git = "https://github.com/hyperium/hyper" }
+http-body-util = "0.1.0-rc.2"
+nix = "0.26"
+pin-project-lite = "0.2"
+quiche = "0.17.2"
+rand = "0.8"
+serde = "1.0"
+serde_json = "1.0"
+slotmap = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tokio = "1.28"
+tokio-boring = { git = "https://github.com/cloudflare/boring", rev = "09d92e54fc5e65511de63f22713428cd729237d9" }
+url = "2.4"
+
+[patch.crates-io]
+quiche = { git = "https://github.com/fisherdarling/quiche", rev = "f8885be0e5194e90f029ca0f150e196e48c2f1a7" }

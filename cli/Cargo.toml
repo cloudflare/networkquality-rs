@@ -1,0 +1,26 @@
+[package]
+name = "mach-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "net"
+path = "./src/net.rs"
+
+[[bin]]
+name = "mach"
+path = "./src/main.rs"
+
+[dependencies]
+nq-speedtests = { workspace = true }
+nq-io = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "macros"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
