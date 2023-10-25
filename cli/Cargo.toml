@@ -5,22 +5,28 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "net"
-path = "./src/net.rs"
+# [[bin]]
+# name = "net"
+# path = "./src/net.rs"
 
 [[bin]]
 name = "mach"
 path = "./src/main.rs"
 
 [dependencies]
-nq-speedtests = { workspace = true }
-nq-io = { workspace = true }
+nq-rpm = { workspace = true }
+nq-core = { workspace = true }
+nq-tokio-network = { workspace = true }
 
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 http = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "macros"] }
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "time",
+    "net",
+    "macros",
+] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

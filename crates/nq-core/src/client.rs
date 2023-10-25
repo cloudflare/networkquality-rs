@@ -1,0 +1,345 @@
+//! Defines two clients, a [`ThroughputClient`] and a normal [`Client`]. The
+//! [`ThroughputClient`] trackes the sending or receiving of body data and sends
+//! byte count updates to a listener. This is useful for determining the
+//! throughput of a flow.
+
+use std::{convert::Infallible, net::ToSocketAddrs, sync::Arc, time::Duration};
+
+use anyhow::Context;
+use http::{HeaderMap, HeaderValue, Uri};
+use http_body_util::BodyExt;
+use hyper::body::{Body, Bytes, Incoming};
+use tokio::sync::mpsc;
+use tracing::{error, info, Instrument};
+
+use crate::{
+    body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
+    oneshot_result, ConnectionId, ConnectionType, Network, OneshotResult, Time, Timestamp,
+};
+
+/// Describes the direction of the client. This determines if the client times
+/// the upload or download of a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// Download the response body.
+    Down,
+    /// Upload the given number of bytes.
+    Up(usize),
+}
+
+/// A [`ThroughputClient`] is a simple client which drives a request/response pair
+/// and returns an [`InflightBody`].
+///
+/// This should be used if you do not care about the request or response, and just
+/// need to load a connection.
+///
+/// The returned [`InflightBody`] can be used to track the progress of an upload
+/// or download and when it finishes.
+pub struct ThroughputClient {
+    conn_id: Option<ConnectionId>,
+    new_connection_type: Option<ConnectionType>,
+    headers: Option<HeaderMap>,
+    direction: Direction,
+}
+
+impl ThroughputClient {
+    /// Create an download oriented [`ThroughputClient`].
+    pub fn download() -> Self {
+        Self {
+            conn_id: None,
+            new_connection_type: None,
+            headers: None,
+            direction: Direction::Down,
+        }
+    }
+
+    /// Create an upload oriented [`ThroughputClient`].
+    pub fn upload(size: usize) -> Self {
+        Self {
+            conn_id: None,
+            new_connection_type: None,
+            headers: None,
+            direction: Direction::Up(size),
+        }
+    }
+
+    /// Send requests on the given [`ConnectionId`].
+    pub fn with_connection(mut self, conn_id: ConnectionId) -> Self {
+        self.conn_id = Some(conn_id);
+        self
+    }
+
+    /// Create a new connection for each request.
+    pub fn new_connection(mut self, conn_type: ConnectionType) -> Self {
+        self.new_connection_type = Some(conn_type);
+        self
+    }
+
+    /// Set the headers for the upload or download request.
+    pub fn headers(mut self, headers: HeaderMap<HeaderValue>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    /// Execute a download or upload request against the given [`Uri`].
+    #[tracing::instrument(skip(self, network, time))]
+    pub fn send(
+        self,
+        uri: Uri,
+        network: Arc<dyn Network>,
+        time: Arc<dyn Time>,
+    ) -> anyhow::Result<OneshotResult<InflightBody>> {
+        let mut headers = self.headers.unwrap_or_default();
+
+        if !headers.contains_key("User-Agent") {
+            headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
+        }
+
+        let host = uri.host().context("uri is missing a host")?.to_string();
+
+        let remote_addr = (host.as_str(), uri.port_u16().unwrap_or(443))
+            .to_socket_addrs()?
+            .next()
+            .context("could not resolve large download url")?;
+
+        let method = match self.direction {
+            Direction::Down => "GET",
+            Direction::Up(_) => "POST",
+        };
+
+        let (tx, rx) = oneshot_result();
+        let (events_tx, events_rx) = mpsc::channel(1024);
+
+        let body: NqBody = match self.direction {
+            Direction::Up(size) => {
+                let dummy_body = UploadBody::new(size);
+
+                let mut body =
+                    CountingBody::new(dummy_body, Duration::from_millis(100), Arc::clone(&time));
+                body.set_sender(events_tx);
+
+                headers.insert("Content-Size", size.into());
+                headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+
+                body.boxed()
+            }
+            Direction::Down => empty().boxed(),
+        };
+
+        let mut request = http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(body)?;
+
+        *request.headers_mut() = headers.clone();
+
+        info!("sending request");
+
+        tokio::spawn(
+            async move {
+                let start = time.now();
+
+                let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
+                    (conn_id, None)
+                } else if let Some(conn_type) = self.new_connection_type {
+                    info!("creating new connection");
+                    let connection = network
+                        .new_connection(start, remote_addr, host, conn_type)
+                        .await?;
+
+                    (connection.id, Some(connection.timing))
+                } else {
+                    todo!()
+                };
+
+                info!(?conn_id, "connection used");
+                let response_fut = network.send_request(conn_id, request);
+
+                let mut response_body = match self.direction {
+                    Direction::Up(_) => {
+                        info!("sending upload events");
+                        if tx
+                            .send(Ok(InflightBody {
+                                conn_id,
+                                timing,
+                                events: events_rx,
+                                start,
+                                headers,
+                            }))
+                            .is_err()
+                        {
+                            // TODO(mark error)
+                        }
+
+                        let (_, incoming) = response_fut.await?.into_parts();
+                        incoming.boxed()
+                    }
+                    Direction::Down => {
+                        let (parts, incoming) = response_fut.await?.into_parts();
+
+                        let mut counting_body = CountingBody::new(
+                            incoming,
+                            Duration::from_millis(100),
+                            Arc::clone(&time),
+                        );
+                        let events = counting_body.subscribe();
+
+                        info!("sending download events");
+                        if tx
+                            .send(Ok(InflightBody {
+                                conn_id,
+                                timing,
+                                start,
+                                events,
+                                headers: parts.headers,
+                            }))
+                            .is_err()
+                        {
+                            // TODO(mark error)
+                        }
+
+                        counting_body.boxed()
+                    }
+                };
+
+                tokio::spawn(async move {
+                    // Consume the response body and keep the connection alive:
+                    info!("waiting for response body");
+                    while response_body.frame().await.is_some() {}
+                });
+
+                Ok::<_, anyhow::Error>(())
+            }
+            .in_current_span(),
+        );
+
+        Ok(rx)
+    }
+}
+
+/// A [`Client`] is a simple client which sends a request and returns a response.
+///
+/// The connection timing, e.g. TCP/TLS overhead, will be inserted into the response
+/// if it exits.
+#[derive(Default)]
+pub struct Client {
+    conn_id: Option<ConnectionId>,
+    new_connection_type: Option<ConnectionType>,
+    headers: Option<HeaderMap>,
+    method: Option<String>,
+}
+
+impl Client {
+    /// Send requests on the given [`ConnectionId`].
+    pub fn with_connection(mut self, conn_id: ConnectionId) -> Self {
+        self.conn_id = Some(conn_id);
+        self
+    }
+
+    /// Create a new connection for each request.
+    pub fn new_connection(mut self, conn_type: ConnectionType) -> Self {
+        self.new_connection_type = Some(conn_type);
+        self
+    }
+
+    /// Set the headers for the upload or download request.
+    pub fn headers(mut self, headers: HeaderMap<HeaderValue>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    /// Set the method used by the client.
+    pub fn method(mut self, method: &str) -> Self {
+        self.method = Some(method.to_string());
+        self
+    }
+
+    /// Send a request to the given uri with the given body, timing how long it
+    /// took.
+    #[tracing::instrument(skip(self, body, network, time))]
+    pub fn send<B>(
+        self,
+        uri: Uri,
+        body: B,
+        network: Arc<dyn Network>,
+        time: Arc<dyn Time>,
+    ) -> anyhow::Result<OneshotResult<http::Response<Incoming>>>
+    where
+        B: Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static,
+    {
+        let mut headers = self.headers.unwrap_or_default();
+
+        if !headers.contains_key("User-Agent") {
+            headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
+        }
+
+        let host = uri.host().context("uri is missing a host")?.to_string();
+
+        let remote_addr = (host.as_str(), uri.port_u16().unwrap_or(443))
+            .to_socket_addrs()?
+            .next()
+            .context("could not resolve large download url")?;
+
+        let method: http::Method = self.method.as_deref().unwrap_or("GET").parse()?;
+
+        let mut request = http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(body.boxed())?;
+
+        *request.headers_mut() = headers.clone();
+
+        info!("sending request");
+
+        let (tx, rx) = oneshot_result();
+        tokio::spawn(
+            async move {
+                let start = time.now();
+
+                let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
+                    (conn_id, None)
+                } else if let Some(conn_type) = self.new_connection_type {
+                    info!("creating new connection");
+                    let connection = network
+                        .new_connection(start, remote_addr, host, conn_type)
+                        .await?;
+
+                    (connection.id, Some(connection.timing))
+                } else {
+                    todo!()
+                };
+
+                info!(?conn_id, "connection used");
+                // todo(fisher): fine-grained send timings for requests
+                let mut response = network.send_request(conn_id, request).await?;
+
+                if let Some(timing) = timing {
+                    response.extensions_mut().insert(timing);
+                }
+
+                if tx.send(Ok(response)).is_err() {
+                    error!("unable to send response");
+                }
+
+                Ok::<_, anyhow::Error>(())
+            }
+            .in_current_span(),
+        );
+
+        Ok(rx)
+    }
+}
+
+/// Consumes body events until the body is finished and returns
+/// the time at which the body finished.
+pub async fn wait_for_finish(
+    mut body_events: mpsc::Receiver<BodyEvent>,
+) -> anyhow::Result<Timestamp> {
+    while let Some(event) = body_events.recv().await {
+        if let BodyEvent::Finished { at } = event {
+            return Ok(at);
+        }
+    }
+
+    Err(anyhow::anyhow!("body did not finish"))
+}

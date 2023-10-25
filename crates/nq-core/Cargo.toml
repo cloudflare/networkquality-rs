@@ -1,0 +1,17 @@
+[package]
+name = "nq-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+boring = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true }
+pin-project-lite = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
+tokio-boring = { workspace = true }
+tracing = { workspace = true }
