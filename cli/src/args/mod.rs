@@ -1,10 +1,12 @@
 pub(crate) mod rpm;
+pub(crate) mod up_down;
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::args::rpm::RpmArgs;
+use crate::args::up_down::DownloadArgs;
 
 ///
 #[derive(Debug, Parser)]
@@ -30,13 +32,7 @@ pub enum Command {
     Rpm(RpmArgs),
     /// Download data (GET) from an endpoint, reporting latency measurements and total
     /// throughput.
-    Download {
-        /// The URL to download data from.
-        #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/download")]
-        url: String,
-        #[clap(short, long = "header")]
-        headers: Vec<String>,
-    },
+    Download(DownloadArgs),
     /// Upload data (POST) to an endpoint,  reporting latency measurements and total
     /// throughput.
     Upload {
@@ -72,9 +68,9 @@ pub enum Command {
 //     headers: Vec<String>,
 // }
 
-/// Describes which underlying transport a proxy uses.
+/// Describes which underlying transport a connection uses.
 #[derive(Debug, Clone, ValueEnum)]
-pub enum ProxyType {
+pub enum ConnType {
     H1,
     H2,
     H3,

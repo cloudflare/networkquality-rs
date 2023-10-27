@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 
 use crate::args::rpm::RpmArgs;
 
+/// Run a responsiveness test.
 pub async fn run(
     cli_config: RpmArgs,
     network: Arc<dyn Network>,

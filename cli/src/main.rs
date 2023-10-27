@@ -1,6 +1,7 @@
 pub(crate) mod args;
 mod report;
 mod rpm;
+mod up_down;
 
 use clap::Parser;
 use nq_core::{Network, StdTime, Time};
@@ -31,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     match command {
         Command::Rpm(config) => rpm::run(config, network, time, shutdown_rx).await?,
+        Command::Download(config) => up_down::download(config, network, time, shutdown_rx).await?,
         _ => unimplemented!(),
     }
 

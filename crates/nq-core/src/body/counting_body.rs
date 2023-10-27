@@ -2,7 +2,7 @@ use std::{sync::Arc, task::Poll, time::Duration};
 
 use hyper::body::{Body, Bytes};
 use tokio::sync::mpsc;
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 
 use crate::{Time, Timestamp};
 
@@ -134,7 +134,7 @@ where
                 Poll::Ready(None)
             }
             Poll::Ready(Some(Err(e))) => {
-                error!(error=?e, "body errored");
+                trace!(error=?e, "body errored");
                 Poll::Ready(Some(Err(e)))
             }
             Poll::Pending => {

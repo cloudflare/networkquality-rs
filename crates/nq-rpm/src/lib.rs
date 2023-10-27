@@ -413,7 +413,7 @@ impl Responsiveness {
             async move {
                 let inflight_body = inflight_body_fut.await?;
 
-                let finished_at = wait_for_finish(inflight_body.events).await?;
+                let finished_result = wait_for_finish(inflight_body.events).await?;
 
                 let Some(connection_timing) = inflight_body.timing else {
                     anyhow::bail!("a new connection with timing should have been created");
@@ -424,7 +424,9 @@ impl Responsiveness {
                         start: connection_timing.start(),
                         time_connect: connection_timing.time_connect(),
                         time_secure: connection_timing.time_secure(),
-                        time_body: finished_at.duration_since(connection_timing.start()),
+                        time_body: finished_result
+                            .finished_at
+                            .duration_since(connection_timing.start()),
                     }))
                     .await
                     .is_err()
@@ -473,12 +475,14 @@ impl Responsiveness {
         tokio::spawn(report_err(event_tx.clone(), async move {
             let inflight_body = inflight_body_fut.await?;
 
-            let finished_at = wait_for_finish(inflight_body.events).await?;
+            let finished_result = wait_for_finish(inflight_body.events).await?;
 
             if event_tx
                 .send(Event::SelfProbe(SelfProbeResult {
                     start: inflight_body.start,
-                    time_body: finished_at.duration_since(inflight_body.start),
+                    time_body: finished_result
+                        .finished_at
+                        .duration_since(inflight_body.start),
                 }))
                 .await
                 .is_err()

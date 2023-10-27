@@ -211,9 +211,15 @@ impl ThroughputClient {
 
                 tokio::spawn(
                     async move {
-                        // Consume the response body and keep the connection alive:
+                        // Consume the response body and keep the connection
+                        // alive. Stop if we hit an error.
                         info!("waiting for response body");
-                        while response_body.frame().await.is_some() {}
+                        while let Some(res) = response_body.frame().await {
+                            if let Err(e) = res {
+                                error!("body closing: {e}");
+                                break;
+                            }
+                        }
                     }
                     .in_current_span(),
                 );
@@ -344,12 +350,28 @@ impl Client {
 /// the time at which the body finished.
 pub async fn wait_for_finish(
     mut body_events: mpsc::Receiver<BodyEvent>,
-) -> anyhow::Result<Timestamp> {
+) -> anyhow::Result<FinishResult> {
+    let mut body_total = 0;
+
     while let Some(event) = body_events.recv().await {
-        if let BodyEvent::Finished { at } = event {
-            return Ok(at);
+        match event {
+            BodyEvent::ByteCount { total, .. } => body_total = total,
+            BodyEvent::Finished { at } => {
+                return Ok(FinishResult {
+                    total: body_total,
+                    finished_at: at,
+                });
+            }
         }
     }
 
     Err(anyhow::anyhow!("body did not finish"))
+}
+
+/// The result of [`wait_for_finish`]
+pub struct FinishResult {
+    /// The total number of bytes seen by the body.
+    pub total: usize,
+    /// When the body finished.
+    pub finished_at: Timestamp,
 }

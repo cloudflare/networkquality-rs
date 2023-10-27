@@ -41,22 +41,30 @@ Use `mach help` to see a list of subcommands and `mach help <subcommand>` or
 ## Examples
 
 Running a responsiveness test with Apple's server: 
-```
+```shell
 mach rpm -c https://mensura.cdn-apple.com/.well-known/nq
 ```
 
 Timing the download of a resource:
-```
+```shell
 mach download https://cloudflare.com/cdn-cgi/trace
+ time_lookup: 0.0000
+time_connect: 0.0531
+ time_secure: 0.1144
+    duration: 0.2224
+         bps: 8130.7393
+ bytes_total: 226
 ```
 
+> uploads still need to be implemented
+
 Timing the upload of 10MB of data:
-```
+```shell
 mach upload --bytes 10000000 https://aim.cloudflare.com/responsiveness/api/v1/upload
 ```
 
 Or time the upload of a file:
-```
+```shell
 mach upload --file ./my-file.bin https://aim.cloudflare.com/responsiveness/api/v1/upload
 ```
 
@@ -109,6 +117,8 @@ directory. They are combined together to form the `mach` cli under `./cli`.
 
 # TODOs
 
+- [ ] implement upload command.
+- [ ] time DNS resolution.
 - [ ] QUIC support.
 - [ ] MASQUE proxying support.
     - [ ] support RPK TLS.
@@ -120,9 +130,9 @@ directory. They are combined together to form the `mach` cli under `./cli`.
     - [ ] latency comparisions with curl
     - [ ] RPM comparisions with different tools against the same server
     - [ ] review/better test the statistics (?)
+- [ ] socket stats for a connection
 - RPM stability decreases as interval duration decreases. Look into calculating
   a better `CountingBody` update rate.
 - Properly signal the connections on a network to shutdown.
-
 
 [draft]: https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03

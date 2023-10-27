@@ -1,3 +1,5 @@
+//! Arguments for running responsiveness tests.
+
 use clap::Args;
 
 #[derive(Debug, Args)]
