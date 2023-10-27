@@ -24,18 +24,17 @@ use url::Url;
 
 use crate::load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 
-// use crate::{load::LoadedConnection, LoadConfig, LoadGenerator, Speedtest};
-
+#[derive(Debug, Clone)]
 pub struct ResponsivenessConfig {
-    large_download_url: Url,
-    small_download_url: Url,
-    upload_url: Url,
-    moving_average_distance: usize,
-    interval_duration: Duration,
-    test_duration: Duration,
-    trimmed_mean_percent: f64,
-    std_tolerance: f64,
-    max_loaded_connections: usize,
+    pub large_download_url: Url,
+    pub small_download_url: Url,
+    pub upload_url: Url,
+    pub moving_average_distance: usize,
+    pub interval_duration: Duration,
+    pub test_duration: Duration,
+    pub trimmed_mean_percent: f64,
+    pub std_tolerance: f64,
+    pub max_loaded_connections: usize,
 }
 
 impl ResponsivenessConfig {
@@ -71,28 +70,6 @@ impl Default for ResponsivenessConfig {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct ResponsivenessResult {
-    capacity: f64,
-    rpm: f64,
-}
-
-impl Display for ResponsivenessResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let custom_options = humansize::FormatSizeOptions::from(DECIMAL)
-            .base_unit(humansize::BaseUnit::Bit)
-            .long_units(false)
-            .decimal_places(2);
-        writeln!(
-            f,
-            "{:8}: {}/s",
-            "capacity",
-            format_size(self.capacity as usize, custom_options)
-        )?;
-        write!(f, "{:>8}: {}", "rpm", self.rpm.round() as usize)
-    }
-}
-
 pub struct Responsiveness {
     start: Timestamp,
     config: ResponsivenessConfig,
@@ -103,11 +80,13 @@ pub struct Responsiveness {
     rpm_series: TimeSeries,
     goodput_saturated: bool,
     rpm_saturated: bool,
-    result: ResponsivenessResult,
+    direction: Direction,
+    rpm: f64,
+    capacity: f64,
 }
 
 impl Responsiveness {
-    pub fn new(config: ResponsivenessConfig) -> anyhow::Result<Self> {
+    pub fn new(config: ResponsivenessConfig, download: bool) -> anyhow::Result<Self> {
         let load_generator = LoadGenerator::new(config.load_config())?;
 
         Ok(Self {
@@ -120,12 +99,27 @@ impl Responsiveness {
             rpm_series: TimeSeries::new(),
             goodput_saturated: false,
             rpm_saturated: false,
-            result: ResponsivenessResult::default(),
+            direction: if download {
+                Direction::Down
+            } else {
+                // 32GB should be enough per loaded connection on a 10G link (?)
+                Direction::Up(32 * 1024 * 1024 * 1024)
+            },
+            rpm: 0.0,
+            capacity: 0.0,
         })
     }
 }
 
 impl Responsiveness {
+    /// Run the responsiveness tests. This is a simple event loop which:
+    /// - executes an interval of the RPM algorithm every `interval_duration`
+    ///   seconds.
+    /// - sends alternating self and foreign probes. todo(fisher): need to limit
+    ///   to 100 probes/sec. (simple semaphore enough?).
+    ///
+    /// When the test completes or the test has been running too long, the test
+    /// completes and the results are reported.
     async fn run_test(
         mut self,
         network: Arc<dyn Network>,
@@ -133,10 +127,12 @@ impl Responsiveness {
         _shutdown: oneshot::Receiver<()>,
     ) -> anyhow::Result<ResponsivenessResult> {
         let env = Env { time, network };
-
         self.start = env.time.now();
 
         let mut interval = 0;
+
+        // todo(fisher): switch to `Time` trait based sleep/interval impl to not
+        // rely on tokio for rpm tests.
         let mut interval_timer = tokio::time::interval(self.config.interval_duration);
 
         let (event_tx, mut event_rx) = mpsc::channel(1024);
@@ -163,6 +159,7 @@ impl Responsiveness {
                         }
                         Event::SelfProbe(s) => {
                             self.self_probe_results.add(s);
+
                             self.send_foreign_probe(event_tx.clone(), &env)?;
                         }
                         Event::Error(e) => {
@@ -171,6 +168,7 @@ impl Responsiveness {
                     }
                 }
                 _ = interval_timer.tick() => {
+                    // updated the load generating connection state.
                     self.load_generator.update();
 
                     if self.on_interval(interval, event_tx.clone(), &env).await? {
@@ -187,18 +185,50 @@ impl Responsiveness {
         }
 
         let now = env.time.now();
-        if self.result.rpm == 0.0 {
-            self.result.rpm = self
+        if self.rpm == 0.0 {
+            self.rpm = self
                 .rpm_series
                 .interval_average(now - Duration::from_secs(2), now)
                 .unwrap_or(0.0);
         }
 
-        println!("\n{}", self.result);
+        // stop all on-going loads.
+        let mut loads = self.load_generator.into_connections();
+        loads.iter_mut().for_each(|load| load.stop());
 
-        Ok(self.result)
+        Ok(ResponsivenessResult {
+            capacity: self.capacity,
+            rpm: self.rpm,
+            foreign_loaded_latencies: self.foreign_probe_results.http,
+            self_probe_latencies: self.self_probe_results.http,
+            loaded_connections: loads,
+        })
     }
 
+    /// Execute a single iteration of the responsiveness algorithm:
+    ///
+    /// * Create a load-generating connection.
+    ///
+    /// * At each interval:
+    ///
+    ///   - Create an additional load-generating connection.
+    ///
+    ///   - If goodput has not saturated:
+    ///
+    ///     - Compute the moving average aggregate goodput at interval i as
+    ///       current_average.
+    ///
+    ///     - If the standard deviation of the past MAD average goodput values is less
+    ///       than SDT of the current_average, declare goodput saturation and move on
+    ///       to probe responsiveness.
+    ///
+    ///   - If goodput saturation has been declared:
+    ///
+    ///     - Compute the responsiveness at interval i as current_responsiveness.
+    ///
+    ///     - If the standard deviation of the past MAD responsiveness values is less
+    ///       than SDT of the current_responsiveness, declare responsiveness
+    ///       saturation and report current_responsiveness as the final test result.
     async fn on_interval(
         &mut self,
         interval: usize,
@@ -210,6 +240,7 @@ impl Responsiveness {
             self.load_generator.count_loads()
         );
 
+        // Determine the currently interval and round it to the interval duration.
         let end_data_interval = self.start + self.config.interval_duration * interval as u32;
         let start_data_interval = instant_minus_intervals(
             end_data_interval,
@@ -232,30 +263,15 @@ impl Responsiveness {
             .interval_std(start_data_interval, end_data_interval)
             .unwrap_or(std::f64::MAX);
 
-        // Goodput is saturated if the std of the last MAD goodputs
-        // is within tolerance % of the current_average.
+        // Goodput is saturated if the std of the last MAD goodputs is within
+        // tolerance % of the current_average.
         let goodput_saturated = std_goodput < current_goodput * self.config.std_tolerance;
         if goodput_saturated {
             // Goodput has stabilized, set the capacity to the average
             // throughput of the last interval.
-            self.result.capacity = current_goodput;
+            self.capacity = current_goodput;
             self.goodput_saturated = true;
         }
-
-        let custom_options = humansize::FormatSizeOptions::from(DECIMAL)
-            .base_unit(humansize::BaseUnit::Bit)
-            .long_units(false)
-            .decimal_places(2);
-        println!(
-            "\tthroughput: {}/s σ{}/s, target σ: {}/s, saturated: {}",
-            format_size(current_goodput as usize, custom_options),
-            format_size(std_goodput as usize, custom_options),
-            format_size(
-                (current_goodput * self.config.std_tolerance) as usize,
-                custom_options
-            ),
-            goodput_saturated,
-        );
 
         let current_rpm = compute_responsiveness(
             &self.foreign_probe_results,
@@ -271,9 +287,11 @@ impl Responsiveness {
             .rpm_series
             .interval_std(start_data_interval, end_data_interval);
 
-        let rpm_saturated = if let Some(std_rpm) = std_rpm {
+        let is_rpm_saturated = if let Some(std_rpm) = std_rpm {
+            // RPM is saturated if the std of the last MAD RPMs is
+            // within tolerance % of the current_rpm.
             if std_rpm < current_rpm * self.config.std_tolerance {
-                self.result.rpm = current_rpm;
+                self.rpm = current_rpm;
                 self.rpm_saturated = true;
                 true
             } else {
@@ -283,21 +301,42 @@ impl Responsiveness {
             false
         };
 
+        // pretty print the results of the interval
+        let custom_options = humansize::FormatSizeOptions::from(DECIMAL)
+            .base_unit(humansize::BaseUnit::Bit)
+            .long_units(false)
+            .decimal_places(2);
         println!(
-            "\trpm: {:.2} σ{:.2}, target: {:.2}, saturated: {}",
+            "\tthroughput: {}/s σ{}/s, target σ: {}/s, saturated: {}",
+            format_size(current_goodput as usize, custom_options),
+            format_size(std_goodput as usize, custom_options),
+            format_size(
+                (current_goodput * self.config.std_tolerance) as usize,
+                custom_options
+            ),
+            goodput_saturated,
+        );
+        println!(
+            "\trpm: {:.2} σ{:.2}, target: {:.2}, saturated: {}\n",
             current_rpm,
             std_rpm.unwrap_or(f64::NAN),
             current_rpm * self.config.std_tolerance,
-            rpm_saturated
+            is_rpm_saturated
         );
 
-        println!();
+        // stop testing if both goodput and RPM saturated:
         Ok(self.goodput_saturated && self.rpm_saturated)
     }
 
+    /// moving average aggregate goodput at interval p: The number of total
+    /// bytes of data transferred within interval p and the MAD (Moving Average Distance) - 1 immediately
+    /// preceding intervals, divided by MAD times ID (Interval Duration).
+    ///
+    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.4-5.2.1
     fn current_average_throughput(&self, end_data_interval: Timestamp) -> f64 {
         let start_data_interval =
             instant_minus_intervals(end_data_interval, 4, self.config.interval_duration);
+
         let mut bytes_seen = 0.0;
 
         for connection in self.load_generator.connections() {
@@ -313,6 +352,9 @@ impl Responsiveness {
         8.0 * bytes_seen / total_time
     }
 
+    /// A GET/POST to an endpoint which sends/receives a large number of bytes
+    /// as quickly as possible. The intent of these connections is to saturate
+    /// a single connection's flow.
     #[tracing::instrument(skip_all)]
     fn new_load_generating_connection(
         &self,
@@ -320,7 +362,7 @@ impl Responsiveness {
         env: &Env,
     ) -> anyhow::Result<()> {
         let oneshot_res = self.load_generator.new_loaded_connection(
-            Direction::Down,
+            self.direction,
             ConnectionType::H2,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
@@ -344,6 +386,15 @@ impl Responsiveness {
         Ok(())
     }
 
+    /// Sends a foreign probe which is a GET on a newly created connection.
+    ///
+    /// > An HTTP GET request on a connection separate from the load-generating
+    /// > connections ("foreign probes"). This probe type mimics the time it
+    /// > takes for a web browser to connect to a new web server and request the
+    /// > first element of a web page (e.g., "index.html"), or the startup time
+    /// > for a video streaming client to launch and begin fetching media.
+    ///
+    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3-3.1.1
     fn send_foreign_probe(
         &mut self,
         event_tx: mpsc::Sender<Event>,
@@ -389,11 +440,26 @@ impl Responsiveness {
         Ok(())
     }
 
+    /// Sends a self probe which is a GET on a load-generating connection.
+    ///
+    ///
+    /// > An HTTP GET request multiplexed on the load-generating connections
+    /// > ("self probes"). This probe type mimics the time it takes for a video
+    /// > streaming client to skip ahead to a different chapter in the same
+    /// > video stream, or for a navigation mapping application to react and
+    /// > fetch new map tiles when the user scrolls the map to view a different
+    /// > area. In a well functioning system, fetching new data over an existing
+    /// > connection should take less time than creating a brand new TLS
+    /// > connection from scratch to do the same thing.
+    ///
+    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3-3.2.1
     fn send_self_probe(
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
     ) -> anyhow::Result<bool> {
+        // The test client should uniformly and randomly select from the active
+        // load-generating connections on which to send self probes.
         let Some(conn_id) = self.load_generator.random_connection() else {
             return Ok(false);
         };
@@ -442,7 +508,6 @@ impl Speedtest for Responsiveness {
         time: Arc<dyn Time>,
         shutdown: oneshot::Receiver<()>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<ResponsivenessResult>> + Send + 'static>> {
-        let network = Arc::new(network);
         Box::pin(Responsiveness::run_test(self, network, time, shutdown))
     }
 }
@@ -493,6 +558,11 @@ impl SelfProbeResults {
     }
 }
 
+/// The responsiveness is then calculated as the weighted mean:
+///
+/// Responsiveness = 60000 /
+/// (1/6*(TM(tcp_f) + TM(tls_f) + TM(http_f)) + 1/2*TM(http_s))
+/// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3.1-4
 fn compute_responsiveness(
     foreign_results: &ForeignProbeResults,
     self_results: &SelfProbeResults,
@@ -548,4 +618,29 @@ impl Debug for Event {
 struct Env {
     time: Arc<dyn Time>,
     network: Arc<dyn Network>,
+}
+
+#[derive(Default, Debug)]
+pub struct ResponsivenessResult {
+    pub capacity: f64,
+    pub rpm: f64,
+    pub foreign_loaded_latencies: TimeSeries,
+    pub self_probe_latencies: TimeSeries,
+    pub loaded_connections: Vec<LoadedConnection>,
+}
+
+impl Display for ResponsivenessResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let custom_options = humansize::FormatSizeOptions::from(DECIMAL)
+            .base_unit(humansize::BaseUnit::Bit)
+            .long_units(false)
+            .decimal_places(2);
+        writeln!(
+            f,
+            "{:8}: {}/s",
+            "capacity",
+            format_size(self.capacity as usize, custom_options)
+        )?;
+        write!(f, "{:>8}: {}", "rpm", self.rpm.round() as usize)
+    }
 }

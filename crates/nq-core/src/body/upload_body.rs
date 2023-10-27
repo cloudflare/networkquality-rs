@@ -16,7 +16,7 @@ pub struct UploadBody {
 
 impl UploadBody {
     pub fn new(size: usize) -> Self {
-        const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10MB
+        const CHUNK_SIZE: usize = 1024 * 1024; // 1MB
 
         UploadBody {
             remaining: size,

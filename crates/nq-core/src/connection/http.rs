@@ -64,7 +64,7 @@ pub async fn tls_connection(
 
     let ssl_stream = tokio_boring::connect(config, domain, Box::new(io) as Box<dyn ByteStream>)
         .await
-        .map_err(|_| anyhow::anyhow!("unable to create tls stream"))?;
+        .map_err(|e| anyhow::anyhow!("unable to create tls stream: {e}"))?;
 
     timing.set_secure(time.now());
 
@@ -103,7 +103,7 @@ pub async fn start_h1_conn(
     Ok(established_connection)
 }
 
-#[tracing::instrument(skip(io, time))]
+#[tracing::instrument(skip(timing, io, time))]
 pub async fn start_h2_conn(
     addr: SocketAddr,
     domain: String,

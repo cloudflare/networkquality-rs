@@ -112,6 +112,7 @@ impl ThroughputClient {
 
         let body: NqBody = match self.direction {
             Direction::Up(size) => {
+                tracing::debug!("tracking upload body");
                 let dummy_body = UploadBody::new(size);
 
                 let mut body =
@@ -123,7 +124,10 @@ impl ThroughputClient {
 
                 body.boxed()
             }
-            Direction::Down => empty().boxed(),
+            Direction::Down => {
+                tracing::debug!("created empty download body");
+                empty().boxed()
+            }
         };
 
         let mut request = http::Request::builder()
@@ -131,21 +135,24 @@ impl ThroughputClient {
             .uri(uri)
             .body(body)?;
 
-        *request.headers_mut() = headers.clone();
+        tracing::debug!("created request");
 
-        info!("sending request");
+        *request.headers_mut() = headers.clone();
 
         tokio::spawn(
             async move {
                 let start = time.now();
 
                 let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
+                    tracing::debug!("using conn_id={conn_id:?}");
+
                     (conn_id, None)
                 } else if let Some(conn_type) = self.new_connection_type {
                     info!("creating new connection");
                     let connection = network
                         .new_connection(start, remote_addr, host, conn_type)
-                        .await?;
+                        .await
+                        .context("creating new connection")?;
 
                     (connection.id, Some(connection.timing))
                 } else {
@@ -168,7 +175,7 @@ impl ThroughputClient {
                             }))
                             .is_err()
                         {
-                            // TODO(mark error)
+                            error!("error sending upload events");
                         }
 
                         let (_, incoming) = response_fut.await?.into_parts();
@@ -195,18 +202,21 @@ impl ThroughputClient {
                             }))
                             .is_err()
                         {
-                            // TODO(mark error)
+                            error!("error sending download events");
                         }
 
                         counting_body.boxed()
                     }
                 };
 
-                tokio::spawn(async move {
-                    // Consume the response body and keep the connection alive:
-                    info!("waiting for response body");
-                    while response_body.frame().await.is_some() {}
-                });
+                tokio::spawn(
+                    async move {
+                        // Consume the response body and keep the connection alive:
+                        info!("waiting for response body");
+                        while response_body.frame().await.is_some() {}
+                    }
+                    .in_current_span(),
+                );
 
                 Ok::<_, anyhow::Error>(())
             }

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{
@@ -71,9 +72,15 @@ impl LoadGenerator {
                 time,
             )?;
 
+        tracing::debug!("got loaded connection response future");
+
         tokio::spawn(
             async move {
-                let inflight_body = response_fut.await?;
+                let inflight_body = response_fut
+                    .await
+                    .context("could not await response for loaded connection")?;
+
+                tracing::debug!("sending loaded connection");
 
                 let _ = tx.send(Ok(LoadedConnection {
                     conn_id: inflight_body.conn_id,
@@ -113,6 +120,10 @@ impl LoadGenerator {
     pub fn count_loads(&self) -> usize {
         self.loads.len()
     }
+
+    pub fn into_connections(self) -> Vec<LoadedConnection> {
+        self.loads
+    }
 }
 
 #[derive(Debug)]
@@ -135,6 +146,11 @@ impl LoadedConnection {
 
     pub fn total_bytes_series(&self) -> &CounterSeries {
         &self.total_bytes_series
+    }
+
+    pub fn stop(&mut self) {
+        self.events_rx.close();
+        self.update();
     }
 }
 

@@ -32,7 +32,6 @@ pin_project_lite::pin_project! {
         time: Arc<dyn Time>,
         last_sent: Timestamp,
         update_every: Duration,
-        poll_count: u8,
         total: usize,
         events_tx: Option<mpsc::Sender<BodyEvent>>,
     }
@@ -50,7 +49,6 @@ impl<B> CountingBody<B> {
             time,
             last_sent,
             update_every,
-            poll_count: 0,
             total: 0,
             events_tx: None,
         }
@@ -93,32 +91,24 @@ where
                     *this.total += data.len();
                 }
 
-                // Only check elapsed time every 5 frames
-                if *this.poll_count >= 5 {
-                    let now = this.time.now();
+                let now = this.time.now();
 
-                    // We've waited long enough, send an update.
-                    if now.duration_since(*this.last_sent) >= *this.update_every {
-                        // We can drop the error here since this is an
-                        // increasing counter. The next send will hopefully
-                        // capture it.
-                        if let Some(tx) = this.events_tx {
-                            let event = BodyEvent::ByteCount {
-                                at: now,
-                                total: *this.total,
-                            };
+                // We've waited long enough, send an update.
+                if now.duration_since(*this.last_sent) >= *this.update_every {
+                    // We can drop the error here since this is an
+                    // increasing counter. The next send will hopefully
+                    // capture it.
+                    if let Some(tx) = this.events_tx {
+                        let event = BodyEvent::ByteCount {
+                            at: now,
+                            total: *this.total,
+                        };
 
-                            debug!(?event, "sending event");
-                            let _ = tx.try_send(BodyEvent::ByteCount {
-                                at: now,
-                                total: *this.total,
-                            });
-                        }
+                        *this.last_sent = now;
+
+                        debug!(?event, "sending event");
+                        let _ = tx.try_send(event);
                     }
-
-                    *this.poll_count = 0;
-                } else {
-                    *this.poll_count += 1;
                 }
 
                 Poll::Ready(Some(Ok(frame)))
@@ -135,10 +125,7 @@ where
                     };
 
                     debug!(?event, "sending event");
-                    let _ = tx.try_send(BodyEvent::ByteCount {
-                        at: now,
-                        total: *this.total,
-                    });
+                    let _ = tx.try_send(event);
 
                     debug!(at=?now, "sending finished");
                     let _ = tx.try_send(BodyEvent::Finished { at: now });

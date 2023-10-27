@@ -1,12 +1,22 @@
-use nq_core::{Network, Speedtest, StdTime, Time};
-use nq_rpm::{Responsiveness, ResponsivenessConfig};
+pub(crate) mod args;
+mod report;
+mod rpm;
+
+use clap::Parser;
+use nq_core::{Network, StdTime, Time};
 use nq_tokio_network::TokioNetwork;
 use tokio::sync::oneshot;
 
 use std::sync::Arc;
 
+use crate::args::rpm::RpmArgs;
+use crate::args::Command;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = args::Cli::parse();
+
+    // todo(fisher): control verbosity
     tracing_subscriber::fmt::init();
 
     let time = Arc::new(StdTime) as Arc<dyn Time>;
@@ -14,12 +24,15 @@ async fn main() -> anyhow::Result<()> {
 
     let (_shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    let config = ResponsivenessConfig::default();
-    let rpm = Responsiveness::new(config)?;
+    // default to RPM
+    let command = args
+        .command
+        .unwrap_or_else(|| Command::Rpm(RpmArgs::default()));
 
-    let test_result = rpm.run(network, time, shutdown_rx).await?;
-
-    println!("{:?}", test_result);
+    match command {
+        Command::Rpm(config) => rpm::run(config, network, time, shutdown_rx).await?,
+        _ => unimplemented!(),
+    }
 
     Ok(())
 }

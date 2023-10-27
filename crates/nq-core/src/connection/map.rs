@@ -6,6 +6,7 @@ use http::Request;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
 use tokio::sync::RwLock;
+use tracing::info;
 
 use crate::connection::http::{start_h2_conn, tls_connection};
 use crate::connection::NewConnection;
@@ -56,6 +57,8 @@ impl ConnectionMap {
         request: Request<BoxBody<Bytes, Infallible>>,
     ) -> Option<ResponseFuture> {
         let mut connections = self.map.write().await;
+
+        info!("sending request on conn_id={conn_id:?}");
 
         connections
             .get_mut(&conn_id)
