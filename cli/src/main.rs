@@ -1,14 +1,12 @@
+mod aim_report;
 pub(crate) mod args;
 mod report;
 mod rpm;
+mod rtt;
 mod up_down;
+mod util;
 
 use clap::Parser;
-use nq_core::{Network, StdTime, Time};
-use nq_tokio_network::TokioNetwork;
-use tokio::sync::oneshot;
-
-use std::sync::Arc;
 
 use crate::args::rpm::RpmArgs;
 use crate::args::Command;
@@ -20,20 +18,16 @@ async fn main() -> anyhow::Result<()> {
     // todo(fisher): control verbosity
     tracing_subscriber::fmt::init();
 
-    let time = Arc::new(StdTime) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(Arc::clone(&time))) as Arc<dyn Network>;
-
-    let (_shutdown_tx, shutdown_rx) = oneshot::channel();
-
     // default to RPM
     let command = args
         .command
         .unwrap_or_else(|| Command::Rpm(RpmArgs::default()));
 
     match command {
-        Command::Rpm(config) => rpm::run(config, network, time, shutdown_rx).await?,
-        Command::Download(config) => up_down::download(config, network, time, shutdown_rx).await?,
-        _ => unimplemented!(),
+        Command::Rpm(config) => rpm::run(config).await?,
+        Command::Download(config) => up_down::download(config).await?,
+        Command::Upload(config) => up_down::upload(config).await?,
+        Command::Rtt { url, runs } => rtt::run(url, runs).await?,
     }
 
     Ok(())

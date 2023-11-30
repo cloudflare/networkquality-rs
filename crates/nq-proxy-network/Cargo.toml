@@ -10,5 +10,6 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 nq-core = { workspace = true }
+shellflip = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tracing = { workspace = true }

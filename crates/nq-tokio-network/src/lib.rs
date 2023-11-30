@@ -9,6 +9,7 @@ use nq_core::{
     oneshot_result, ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType, Network,
     NewConnection, NqBody, OneshotResult, ResponseFuture, Time, Timestamp,
 };
+use shellflip::{ShutdownHandle, ShutdownSignal};
 use tokio::net::TcpStream;
 use tracing::{error, info, Instrument};
 
@@ -18,9 +19,9 @@ pub struct TokioNetwork {
 }
 
 impl TokioNetwork {
-    pub fn new(time: Arc<dyn Time>) -> Self {
+    pub fn new(time: Arc<dyn Time>, shutdown: Arc<ShutdownHandle>) -> Self {
         Self {
-            inner: TokioNetworkInner::new(time),
+            inner: TokioNetworkInner::new(time, shutdown),
         }
     }
 }
@@ -107,13 +108,28 @@ impl Network for TokioNetwork {
 pub struct TokioNetworkInner {
     connections: Arc<ConnectionMap>,
     time: Arc<dyn Time>,
+    shutdown: Arc<ShutdownHandle>,
 }
 
 impl TokioNetworkInner {
-    pub fn new(time: Arc<dyn Time>) -> Self {
+    pub fn new(time: Arc<dyn Time>, shutdown: Arc<ShutdownHandle>) -> Self {
+        let connections: Arc<ConnectionMap> = Default::default();
+
+        tokio::spawn({
+            let connections = Arc::clone(&connections);
+            let mut signal = ShutdownSignal::from(&*shutdown);
+
+            async move {
+                signal.on_shutdown().await;
+                info!("shutting down connections");
+                connections.shutdown().await;
+            }
+        });
+
         Self {
-            connections: Default::default(),
+            connections,
             time,
+            shutdown,
         }
     }
 
@@ -140,6 +156,7 @@ impl TokioNetworkInner {
                 conn_type,
                 Box::new(tcp_stream),
                 &*self.time,
+                ShutdownSignal::from(&*self.shutdown),
             )
             .await?;
 

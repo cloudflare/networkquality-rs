@@ -10,10 +10,11 @@ boring = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
-hyper-util = { workspace = true }
+hyper-util = { workspace = true, features = ["tokio"] }
 pin-project-lite = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+shellflip = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
 tokio-boring = { workspace = true }
 tracing = { workspace = true }

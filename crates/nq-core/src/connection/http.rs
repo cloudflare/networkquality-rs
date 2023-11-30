@@ -8,6 +8,8 @@ use http::{Request, Response};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
+use shellflip::ShutdownSignal;
+use tokio::select;
 use tracing::{debug, error, info, Instrument};
 
 use crate::body::NqBody;
@@ -22,23 +24,27 @@ pub type TlsStream = tokio_boring::SslStream<Box<dyn ByteStream>>;
 #[derive(Debug)]
 pub struct EstablishedConnection {
     timing: ConnectionTiming,
-    send_request: SendRequest,
+    send_request: Option<SendRequest>,
 }
 
 impl EstablishedConnection {
     pub fn new(timing: ConnectionTiming, send_request: SendRequest) -> Self {
         Self {
             timing,
-            send_request,
+            send_request: Some(send_request),
         }
     }
 
-    pub fn send_request(&mut self, req: Request<NqBody>) -> ResponseFuture {
-        self.send_request.send_request(req)
+    pub fn send_request(&mut self, req: Request<NqBody>) -> Option<ResponseFuture> {
+        self.send_request.as_mut().map(|s| s.send_request(req))
     }
 
     pub fn timing(&self) -> ConnectionTiming {
         self.timing
+    }
+
+    pub fn drop_send_request(&mut self) {
+        self.send_request = None;
     }
 }
 
@@ -73,25 +79,32 @@ pub async fn tls_connection(
     Ok(ssl_stream)
 }
 
-#[tracing::instrument(skip(io, time))]
+#[tracing::instrument(skip(io, time, shutdown_signal))]
 pub async fn start_h1_conn(
     domain: String,
     mut timing: ConnectionTiming,
     io: impl ByteStream,
-    time: impl Time,
+    time: &dyn Time,
+    mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<EstablishedConnection> {
     let (send_request, connection) = http1::handshake(TokioIo::new(io)).await?;
     timing.set_application(time.now());
-    // let time_handshake = started_at.elapsed();
 
-    tokio::spawn({
-        let domain = domain.clone();
+    tokio::spawn(
         async move {
-            if let Err(e) = connection.await {
-                eprintln!("[{domain}] error: {e}");
+            select! {
+                Err(e) = connection => {
+                    error!(error=%e, "error running connection");
+                }
+                _ = shutdown_signal.on_shutdown() => {
+                    debug!("shutting down h1 connection");
+                }
             }
+
+            info!("connection finished");
         }
-    });
+        .in_current_span(),
+    );
 
     let established_connection = EstablishedConnection::new(
         timing,
@@ -103,13 +116,14 @@ pub async fn start_h1_conn(
     Ok(established_connection)
 }
 
-#[tracing::instrument(skip(timing, io, time))]
+#[tracing::instrument(skip(timing, io, time, shutdown_signal))]
 pub async fn start_h2_conn(
     addr: SocketAddr,
     domain: String,
     mut timing: ConnectionTiming,
     io: impl ByteStream,
     time: &dyn Time,
+    mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<EstablishedConnection> {
     let (dispatch, connection) = http2::handshake(TokioExecutor, TokioIo::new(io)).await?;
     timing.set_application(time.now());
@@ -118,8 +132,13 @@ pub async fn start_h2_conn(
 
     tokio::spawn(
         async move {
-            if let Err(e) = connection.await {
-                error!(error=%e, "error running connection");
+            select! {
+                Err(e) = connection => {
+                    error!(error=%e, "error running connection");
+                }
+                _ = shutdown_signal.on_shutdown() => {
+                    debug!("shutting down h2 connection");
+                }
             }
 
             info!("connection finished");

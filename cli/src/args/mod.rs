@@ -1,12 +1,10 @@
 pub(crate) mod rpm;
 pub(crate) mod up_down;
 
-use std::path::PathBuf;
-
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::args::rpm::RpmArgs;
-use crate::args::up_down::DownloadArgs;
+use crate::args::up_down::{DownloadArgs, UploadArgs};
 
 ///
 #[derive(Debug, Parser)]
@@ -35,21 +33,19 @@ pub enum Command {
     Download(DownloadArgs),
     /// Upload data (POST) to an endpoint,  reporting latency measurements and total
     /// throughput.
-    Upload {
-        /// The URL to upload data to.
+    Upload(UploadArgs),
+    /// Determine RTT using the time it takes to establish a TCP connection.
+    /// This is not a perfect measurement of RTT, but it's close.
+    Rtt {
+        /// The URL to perform a GET request against. The full GET time is not
+        /// measured, just the TCP handshake.
         #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/upload")]
+        #[clap(short, long)]
         url: String,
-        /// The number of arbitrary bytes to upload. Only one of `bytes` or
-        /// `file` can be set.
+        /// How many measurements to perform.
+        #[clap(default_value = "20")]
         #[clap(short, long)]
-        bytes: Option<usize>,
-        /// Upload the contents of a file. Only one of `bytes` or `file` can be
-        /// set.
-        #[clap(short, long)]
-        file: Option<PathBuf>,
-        /// Headers to add to the request.
-        #[clap(short, long = "header")]
-        headers: Vec<String>,
+        runs: usize,
     },
 }
 

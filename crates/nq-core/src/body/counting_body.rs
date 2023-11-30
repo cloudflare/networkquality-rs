@@ -33,7 +33,7 @@ pin_project_lite::pin_project! {
         last_sent: Timestamp,
         update_every: Duration,
         total: usize,
-        events_tx: Option<mpsc::Sender<BodyEvent>>,
+        events_tx: mpsc::Sender<BodyEvent>,
     }
 }
 
@@ -41,30 +41,32 @@ impl<B> CountingBody<B> {
     /// Create a [`CountingBody`] by wrapping the given body. Updates are sent
     /// every `update_every` duration and timestamps are taken with the given
     /// [`Arc<dyn Time>`].
-    pub fn new(inner: B, update_every: Duration, time: Arc<dyn Time>) -> Self {
+    pub fn new(
+        inner: B,
+        update_every: Duration,
+        time: Arc<dyn Time>,
+    ) -> (Self, mpsc::Receiver<BodyEvent>) {
+        let (events_tx, events_rx) = mpsc::channel(1024);
         let last_sent = time.now();
 
-        Self {
-            inner,
-            time,
-            last_sent,
-            update_every,
-            total: 0,
-            events_tx: None,
-        }
-    }
+        events_tx
+            .try_send(BodyEvent::ByteCount {
+                at: last_sent,
+                total: 0,
+            })
+            .expect("no data buffered");
 
-    /// Subscribe to [`BodyEvent`] updates from the [`CountingBody`]. This
-    /// removes any previous subscribers.
-    pub fn subscribe(&mut self) -> mpsc::Receiver<BodyEvent> {
-        let (events_tx, events_rx) = mpsc::channel(1024);
-        self.events_tx = Some(events_tx);
-        events_rx
-    }
-
-    /// Set the sender that [`BodyEvent`]s are sent on.
-    pub fn set_sender(&mut self, events_tx: mpsc::Sender<BodyEvent>) {
-        self.events_tx = Some(events_tx);
+        (
+            Self {
+                inner,
+                time,
+                last_sent,
+                update_every,
+                total: 0,
+                events_tx,
+            },
+            events_rx,
+        )
     }
 }
 
@@ -84,6 +86,12 @@ where
     ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
         let this = self.project();
 
+        // stop the body if there's no event sender.
+        if this.events_tx.is_closed() {
+            debug!("events_tx is closed, stopping");
+            return Poll::Ready(None);
+        }
+
         trace!("polling frame");
         match this.inner.poll_frame(cx) {
             Poll::Ready(Some(Ok(frame))) => {
@@ -95,20 +103,19 @@ where
 
                 // We've waited long enough, send an update.
                 if now.duration_since(*this.last_sent) >= *this.update_every {
+                    let event = BodyEvent::ByteCount {
+                        at: now,
+                        total: *this.total,
+                    };
+
+                    *this.last_sent = now;
+
+                    debug!(?event, "sending event");
+
                     // We can drop the error here since this is an
                     // increasing counter. The next send will hopefully
                     // capture it.
-                    if let Some(tx) = this.events_tx {
-                        let event = BodyEvent::ByteCount {
-                            at: now,
-                            total: *this.total,
-                        };
-
-                        *this.last_sent = now;
-
-                        debug!(?event, "sending event");
-                        let _ = tx.try_send(event);
-                    }
+                    let _ = this.events_tx.try_send(event);
                 }
 
                 Poll::Ready(Some(Ok(frame)))
@@ -118,18 +125,16 @@ where
                 let now = this.time.now();
 
                 debug!("body finished");
-                if let Some(tx) = this.events_tx {
-                    let event = BodyEvent::ByteCount {
-                        at: now,
-                        total: *this.total,
-                    };
+                let event = BodyEvent::ByteCount {
+                    at: now,
+                    total: *this.total,
+                };
 
-                    debug!(?event, "sending event");
-                    let _ = tx.try_send(event);
+                debug!(?event, "sending event");
+                let _ = this.events_tx.try_send(event);
 
-                    debug!(at=?now, "sending finished");
-                    let _ = tx.try_send(BodyEvent::Finished { at: now });
-                }
+                debug!(at=?now, "sending finished");
+                let _ = this.events_tx.try_send(BodyEvent::Finished { at: now });
 
                 Poll::Ready(None)
             }
@@ -142,5 +147,13 @@ where
                 Poll::Pending
             }
         }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
     }
 }

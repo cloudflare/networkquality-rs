@@ -10,6 +10,7 @@ use nq_core::{
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
+use shellflip::ShutdownSignal;
 use tokio::sync::mpsc::Receiver;
 use tracing::Instrument;
 
@@ -45,13 +46,14 @@ impl LoadGenerator {
         })
     }
 
-    #[tracing::instrument(skip(self, network, time))]
+    #[tracing::instrument(skip(self, network, time, shutdown))]
     pub fn new_loaded_connection(
         &self,
         direction: Direction,
         conn_type: ConnectionType,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
+        shutdown: ShutdownSignal,
     ) -> anyhow::Result<OneshotResult<LoadedConnection>> {
         let (tx, rx) = oneshot_result();
 
@@ -70,6 +72,7 @@ impl LoadGenerator {
                 },
                 network,
                 time,
+                shutdown,
             )?;
 
         tracing::debug!("got loaded connection response future");
@@ -102,9 +105,8 @@ impl LoadGenerator {
     }
 
     pub fn random_connection(&self) -> Option<ConnectionId> {
-        self.loads
-            .choose(&mut rand::thread_rng())
-            .map(|c| c.conn_id)
+        let loads: Vec<_> = self.ongoing_loads().collect();
+        loads.choose(&mut rand::thread_rng()).map(|c| c.conn_id)
     }
 
     pub fn push(&mut self, loaded_connection: LoadedConnection) {
@@ -117,8 +119,12 @@ impl LoadGenerator {
         }
     }
 
+    pub fn ongoing_loads(&self) -> impl Iterator<Item = &LoadedConnection> {
+        self.loads.iter().filter(|load| load.finished_at.is_none())
+    }
+
     pub fn count_loads(&self) -> usize {
-        self.loads.len()
+        self.ongoing_loads().count()
     }
 
     pub fn into_connections(self) -> Vec<LoadedConnection> {

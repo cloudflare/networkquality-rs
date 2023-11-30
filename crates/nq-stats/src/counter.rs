@@ -1,4 +1,5 @@
 use nq_core::Timestamp;
+use tracing::debug;
 
 #[derive(Debug, Default)]
 pub struct CounterSeries {
@@ -33,22 +34,24 @@ impl CounterSeries {
     }
 
     pub fn sample_interval(&self, from: Timestamp, to: Timestamp) -> Option<SampleRange> {
-        let start = self.timestamps.partition_point(|t| t < &from);
-        let end = self.timestamps.partition_point(|t| t < &to);
+        let start_idx = self.timestamps.partition_point(|t| t < &from);
+        let end_idx = self.timestamps.partition_point(|t| t < &to);
 
         // end is either somewhere in the range or the last idx:
-        let end = self.timestamps.len().saturating_sub(1).min(end);
+        let end = self.timestamps.len().saturating_sub(1).min(end_idx);
 
         let start = self
             .timestamps
-            .get(start)
+            .get(start_idx)
             .copied()
-            .zip(self.samples.get(start).copied())?;
+            .zip(self.samples.get(start_idx).copied())?;
         let end = self
             .timestamps
             .get(end)
             .copied()
             .zip(self.samples.get(end).copied())?;
+
+        debug!("sample interval: from={from:?}, to={to:?}, start_idx={start_idx}, end_idx={end_idx}, start={start:?}, end={end:?}");
 
         Some(SampleRange { start, end })
     }

@@ -1,5 +1,6 @@
 mod counter;
 
+use std::cmp::Ordering;
 use std::time::Duration;
 
 use nq_core::Timestamp;
@@ -97,6 +98,15 @@ impl TimeSeries {
 
     pub fn samples(&self) -> &[(Timestamp, f64)] {
         &self.samples
+    }
+
+    pub fn quantile(&self, quantile: f64) -> Option<f64> {
+        let mut values: Vec<f64> = self.values().collect();
+        values.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Less));
+
+        values
+            .get((values.len() as f64 * quantile) as usize)
+            .copied()
     }
 }
 

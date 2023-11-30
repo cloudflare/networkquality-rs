@@ -8,5 +8,6 @@ anyhow = { workspace = true }
 http = { workspace = true }
 hyper = { workspace = true }
 nq-core = { workspace = true }
+shellflip = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tracing = { workspace = true }

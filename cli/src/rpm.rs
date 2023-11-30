@@ -1,23 +1,43 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nq_core::{Network, Speedtest, Time};
-use nq_rpm::{Responsiveness, ResponsivenessConfig};
-use tokio::sync::oneshot;
+use anyhow::Context;
+use nq_core::{Network, Speedtest, StdTime, Time};
+use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
+use nq_rtt::RttConfig;
+use nq_tokio_network::TokioNetwork;
+use serde::{Deserialize, Serialize};
+use shellflip::{ShutdownCoordinator, ShutdownSignal};
+use tokio::time::timeout;
+use tracing::{debug, error, info};
 
+use crate::aim_report::CloudflareAimResults;
 use crate::args::rpm::RpmArgs;
+use crate::report::Report;
 
 /// Run a responsiveness test.
-pub async fn run(
-    cli_config: RpmArgs,
-    network: Arc<dyn Network>,
-    time: Arc<dyn Time>,
-    shutdown: oneshot::Receiver<()>,
-) -> anyhow::Result<()> {
+pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
+    // first get unloaded RTT measurements
+    info!("determining rtt");
+    let rtt_result = crate::rtt::run_test(&RttConfig {
+        url: cli_config.small_download_url.parse()?,
+        runs: 20,
+    })
+    .await?;
+
+    let rpm_urls = match cli_config.config {
+        Some(endpoint) => get_rpm_config(endpoint).await?.urls,
+        None => RpmUrls {
+            small_https_download_url: cli_config.small_download_url,
+            large_https_download_url: cli_config.large_download_url,
+            https_upload_url: cli_config.upload_url,
+        },
+    };
+
     let config = ResponsivenessConfig {
-        large_download_url: cli_config.large_download_url.parse()?,
-        small_download_url: cli_config.small_download_url.parse()?,
-        upload_url: cli_config.upload_url.parse()?,
+        large_download_url: rpm_urls.large_https_download_url.parse()?,
+        small_download_url: rpm_urls.small_https_download_url.parse()?,
+        upload_url: rpm_urls.https_upload_url.parse()?,
         moving_average_distance: cli_config.moving_average_distance,
         interval_duration: Duration::from_millis(cli_config.interval_duration_ms),
         test_duration: Duration::from_millis(cli_config.test_duration_ms),
@@ -26,20 +46,82 @@ pub async fn run(
         max_loaded_connections: cli_config.max_loaded_connections,
     };
 
-    let download_rpm = Responsiveness::new(config.clone(), true)?;
-    let download_result = download_rpm
-        .run(Arc::clone(&network), Arc::clone(&time), shutdown)
-        .await?;
+    info!("running download test");
+    let download_result = run_test(&config, true).await?;
+    debug!("download result={download_result:?}");
 
-    println!("{}", download_result);
+    info!("running upload test");
+    let upload_result = run_test(&config, false).await?;
+    debug!("upload result={upload_result:?}");
 
-    // todo(fisher): need to properly shutdown connections before running the
-    // upload test.
+    let aim_results =
+        CloudflareAimResults::from_rpm_results(&rtt_result, &download_result, &upload_result);
 
-    // let (_tx, rx) = oneshot::channel();
-    // let upload_rpm = Responsiveness::new(config, false)?;
-    // let upload_result = upload_rpm.run(network, time, rx).await?;
-    // println!("upload result: \n{:?}", upload_result);
+    debug!("uploading report");
+    let upload_handle = tokio::spawn(async move {
+        if let Err(e) = aim_results.upload().await {
+            error!("error uploading aim results: {e}");
+        }
+    });
+
+    info!("generating rpm report");
+    let report = Report::from_rtt_and_rpm_results(&rtt_result, &download_result, &upload_result)
+        .context("building RPM report")?;
+
+    println!("{}", serde_json::to_string_pretty(&report)?);
+
+    let _ = timeout(Duration::from_secs(1), upload_handle).await;
 
     Ok(())
+}
+
+async fn run_test(
+    config: &ResponsivenessConfig,
+    download: bool,
+) -> anyhow::Result<ResponsivenessResult> {
+    let shutdown_coordinator = ShutdownCoordinator::default();
+    let time = Arc::new(StdTime) as Arc<dyn Time>;
+    let network = Arc::new(TokioNetwork::new(
+        Arc::clone(&time),
+        shutdown_coordinator.handle(),
+    )) as Arc<dyn Network>;
+
+    let rpm = Responsiveness::new(config.clone(), download)?;
+    let result = rpm
+        .run(
+            Arc::clone(&network),
+            Arc::clone(&time),
+            ShutdownSignal::from(&*shutdown_coordinator.handle()),
+        )
+        .await?;
+
+    debug!("shutting down rpm test");
+    shutdown_coordinator.shutdown_with_timeout(1).await;
+
+    Ok(result)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RpmServerConfig {
+    urls: RpmUrls,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RpmUrls {
+    #[serde(alias = "small_download_url")]
+    small_https_download_url: String,
+    #[serde(alias = "large_download_url")]
+    large_https_download_url: String,
+    #[serde(alias = "upload_url")]
+    https_upload_url: String,
+}
+
+pub async fn get_rpm_config(config_url: String) -> anyhow::Result<RpmServerConfig> {
+    tokio::task::spawn_blocking(move || {
+        ureq::get(&config_url)
+            .call()?
+            .into_json()
+            .map_err(Into::into)
+    })
+    .await?
 }

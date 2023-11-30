@@ -15,14 +15,13 @@ use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{client::wait_for_finish, Network};
 use nq_core::{ConnectionType, Speedtest, Time, Timestamp};
 use nq_stats::{instant_minus_intervals, TimeSeries};
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-};
-use tracing::{error, Instrument};
+use shellflip::ShutdownSignal;
+use tokio::{select, sync::mpsc};
+use tracing::{debug, info, Instrument};
 use url::Url;
 
-use crate::load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
+pub use crate::load_generator::LoadedConnection;
+use crate::load_generator::{LoadConfig, LoadGenerator};
 
 #[derive(Debug, Clone)]
 pub struct ResponsivenessConfig {
@@ -124,12 +123,14 @@ impl Responsiveness {
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        _shutdown: oneshot::Receiver<()>,
+        mut shutdown: ShutdownSignal,
     ) -> anyhow::Result<ResponsivenessResult> {
         let env = Env { time, network };
         self.start = env.time.now();
 
-        let mut interval = 0;
+        info!("running responsiveness test: {:?}", self.config);
+
+        let mut interval = None;
 
         // todo(fisher): switch to `Time` trait based sleep/interval impl to not
         // rely on tokio for rpm tests.
@@ -137,8 +138,8 @@ impl Responsiveness {
 
         let (event_tx, mut event_rx) = mpsc::channel(1024);
 
-        self.new_load_generating_connection(event_tx.clone(), &env)?;
-        self.send_foreign_probe(event_tx.clone(), &env)?;
+        self.new_load_generating_connection(event_tx.clone(), &env, shutdown.clone())?;
+        self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
 
         loop {
             select! {
@@ -153,14 +154,14 @@ impl Responsiveness {
                             // There might not be an available load generating
                             // connection to send a self probe on. If that's the
                             // case, send another foreign probe.
-                            if !self.send_self_probe(event_tx.clone(), &env)? {
-                                self.send_foreign_probe(event_tx.clone(), &env)?;
+                            if !self.send_self_probe(event_tx.clone(), &env, shutdown.clone())? {
+                                self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
                             }
                         }
                         Event::SelfProbe(s) => {
                             self.self_probe_results.add(s);
 
-                            self.send_foreign_probe(event_tx.clone(), &env)?;
+                            self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
                         }
                         Event::Error(e) => {
                             println!("error: {e}");
@@ -171,15 +172,23 @@ impl Responsiveness {
                     // updated the load generating connection state.
                     self.load_generator.update();
 
-                    if self.on_interval(interval, event_tx.clone(), &env).await? {
-                        break;
-                    }
+                    if let Some(interval) = interval.as_mut() {
+                        if self.on_interval(*interval, event_tx.clone(), &env, shutdown.clone()).await? {
+                            break;
+                        }
 
-                    interval += 1;
+                        *interval += 1;
+                    } else {
+                        interval = Some(0);
+                    }
+                }
+                _ = shutdown.on_shutdown() => {
+                    debug!("shutdown requested");
+                    break;
                 }
             };
 
-            if self.start.elapsed(&*env.time) > self.config.test_duration {
+            if env.time.now().duration_since(self.start) > self.config.test_duration {
                 break;
             }
         }
@@ -202,6 +211,8 @@ impl Responsiveness {
             foreign_loaded_latencies: self.foreign_probe_results.http,
             self_probe_latencies: self.self_probe_results.http,
             loaded_connections: loads,
+            duration: now.duration_since(self.start),
+            average_goodput_series: self.average_goodput_series,
         })
     }
 
@@ -234,12 +245,8 @@ impl Responsiveness {
         interval: usize,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
+        shutdown: ShutdownSignal,
     ) -> anyhow::Result<bool> {
-        println!(
-            "interval: {interval}, loads={}",
-            self.load_generator.count_loads()
-        );
-
         // Determine the currently interval and round it to the interval duration.
         let end_data_interval = self.start + self.config.interval_duration * interval as u32;
         let start_data_interval = instant_minus_intervals(
@@ -250,8 +257,10 @@ impl Responsiveness {
 
         // always start a load generating connection
         // TODO: only if goodput is not saturated?
-        if self.load_generator.count_loads() < self.config.max_loaded_connections {
-            self.new_load_generating_connection(event_tx, env)?;
+        if self.load_generator.count_loads() < self.config.max_loaded_connections
+            && interval % 2 == 0
+        {
+            self.new_load_generating_connection(event_tx, env, shutdown)?;
         }
 
         let current_goodput = self.current_average_throughput(end_data_interval);
@@ -281,6 +290,11 @@ impl Responsiveness {
             self.config.trimmed_mean_percent,
         )
         .unwrap_or(0.0);
+
+        if current_rpm.is_nan() {
+            panic!("NaN rpm!");
+        }
+
         self.rpm_series.add(end_data_interval, current_rpm);
 
         let std_rpm = self
@@ -301,31 +315,58 @@ impl Responsiveness {
             false
         };
 
+        self.log_interval(
+            interval,
+            current_goodput,
+            std_goodput,
+            goodput_saturated,
+            current_rpm,
+            std_rpm,
+            is_rpm_saturated,
+        );
+
+        // stop testing if both goodput and RPM saturated:
+        Ok(self.goodput_saturated && self.rpm_saturated)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn log_interval(
+        &mut self,
+        interval: usize,
+        current_goodput: f64,
+        std_goodput: f64,
+        goodput_saturated: bool,
+        current_rpm: f64,
+        std_rpm: Option<f64>,
+        is_rpm_saturated: bool,
+    ) {
         // pretty print the results of the interval
         let custom_options = humansize::FormatSizeOptions::from(DECIMAL)
             .base_unit(humansize::BaseUnit::Bit)
             .long_units(false)
             .decimal_places(2);
-        println!(
-            "\tthroughput: {}/s σ{}/s, target σ: {}/s, saturated: {}",
-            format_size(current_goodput as usize, custom_options),
-            format_size(std_goodput as usize, custom_options),
-            format_size(
+
+        info!(
+            interval,
+            loads = self.load_generator.count_loads(),
+            throughput = format_size(current_goodput as usize, custom_options),
+            rpm = current_rpm,
+            throughput_saturated = goodput_saturated,
+            rpm_saturated = is_rpm_saturated,
+            "interval finished"
+        );
+
+        info!(
+            interval,
+            throughput_std = format_size(std_goodput as usize, custom_options),
+            throughput_target_std = format_size(
                 (current_goodput * self.config.std_tolerance) as usize,
                 custom_options
             ),
-            goodput_saturated,
+            rpm_std = std_rpm.unwrap_or(f64::NAN),
+            rpm_target_std = current_rpm * self.config.std_tolerance,
+            "interval stats"
         );
-        println!(
-            "\trpm: {:.2} σ{:.2}, target: {:.2}, saturated: {}\n",
-            current_rpm,
-            std_rpm.unwrap_or(f64::NAN),
-            current_rpm * self.config.std_tolerance,
-            is_rpm_saturated
-        );
-
-        // stop testing if both goodput and RPM saturated:
-        Ok(self.goodput_saturated && self.rpm_saturated)
     }
 
     /// moving average aggregate goodput at interval p: The number of total
@@ -360,25 +401,23 @@ impl Responsiveness {
         &self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
+        shutdown: ShutdownSignal,
     ) -> anyhow::Result<()> {
         let oneshot_res = self.load_generator.new_loaded_connection(
             self.direction,
             ConnectionType::H2,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
+            shutdown,
         )?;
 
         tokio::spawn(
             async move {
-                let send_res = match oneshot_res.await {
+                let _ = match oneshot_res.await {
                     Ok(conn) => event_tx.send(Event::NewLoadedConnection(conn)),
                     Err(e) => event_tx.send(Event::Error(e)),
                 }
                 .await;
-
-                if send_res.is_err() {
-                    error!("error sending load generating connection to event stream");
-                }
             }
             .in_current_span(),
         );
@@ -399,6 +438,7 @@ impl Responsiveness {
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
+        shutdown: ShutdownSignal,
     ) -> anyhow::Result<()> {
         let inflight_body_fut = ThroughputClient::download()
             .new_connection(ConnectionType::H2)
@@ -406,6 +446,7 @@ impl Responsiveness {
                 self.config.small_download_url.as_str().parse()?,
                 Arc::clone(&env.network),
                 Arc::clone(&env.time),
+                shutdown,
             )?;
 
         tokio::spawn(report_err(
@@ -459,6 +500,7 @@ impl Responsiveness {
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
+        shutdown: ShutdownSignal,
     ) -> anyhow::Result<bool> {
         // The test client should uniformly and randomly select from the active
         // load-generating connections on which to send self probes.
@@ -470,28 +512,34 @@ impl Responsiveness {
             self.config.small_download_url.as_str().parse()?,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
+            shutdown.clone(),
         )?;
 
-        tokio::spawn(report_err(event_tx.clone(), async move {
-            let inflight_body = inflight_body_fut.await?;
+        tokio::spawn(report_err(
+            event_tx.clone(),
+            async move {
+                let inflight_body = inflight_body_fut.await?;
 
-            let finished_result = wait_for_finish(inflight_body.events).await?;
+                let finish_result = wait_for_finish(inflight_body.events).await?;
+                debug!("self_probe_finished: {finish_result:?}");
 
-            if event_tx
-                .send(Event::SelfProbe(SelfProbeResult {
-                    start: inflight_body.start,
-                    time_body: finished_result
-                        .finished_at
-                        .duration_since(inflight_body.start),
-                }))
-                .await
-                .is_err()
-            {
-                anyhow::bail!("unable to send self probe result");
+                if event_tx
+                    .send(Event::SelfProbe(SelfProbeResult {
+                        start: inflight_body.start,
+                        time_body: finish_result
+                            .finished_at
+                            .duration_since(inflight_body.start),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    anyhow::bail!("unable to send self probe result");
+                }
+
+                Ok(())
             }
-
-            Ok(())
-        }));
+            .in_current_span(),
+        ));
 
         Ok(true)
     }
@@ -510,7 +558,7 @@ impl Speedtest for Responsiveness {
         self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        shutdown: oneshot::Receiver<()>,
+        shutdown: ShutdownSignal,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<ResponsivenessResult>> + Send + 'static>> {
         Box::pin(Responsiveness::run_test(self, network, time, shutdown))
     }
@@ -626,11 +674,13 @@ struct Env {
 
 #[derive(Default, Debug)]
 pub struct ResponsivenessResult {
+    pub duration: Duration,
     pub capacity: f64,
     pub rpm: f64,
     pub foreign_loaded_latencies: TimeSeries,
     pub self_probe_latencies: TimeSeries,
     pub loaded_connections: Vec<LoadedConnection>,
+    pub average_goodput_series: TimeSeries,
 }
 
 impl Display for ResponsivenessResult {

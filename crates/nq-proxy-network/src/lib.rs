@@ -9,6 +9,7 @@ use nq_core::{
     oneshot_result, ConnectUpgraded, ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType,
     Network, NewConnection, NqBody, OneshotResult, ResponseFuture, Time, Timestamp,
 };
+use shellflip::{ShutdownHandle, ShutdownSignal};
 use tracing::{info, Instrument};
 
 pub struct ProxyConfig {
@@ -55,9 +56,14 @@ pub struct ProxyNetwork<N> {
 }
 
 impl<N: Network> ProxyNetwork<N> {
-    pub fn new(config: ProxyConfig, network: N, time: Arc<dyn Time>) -> Self {
+    pub fn new(
+        config: ProxyConfig,
+        network: N,
+        time: Arc<dyn Time>,
+        shutdown: Arc<ShutdownHandle>,
+    ) -> Self {
         Self {
-            inner: Arc::new(ProxyNetworkInner::new(config, network, time)),
+            inner: Arc::new(ProxyNetworkInner::new(config, network, time, shutdown)),
         }
     }
 }
@@ -67,15 +73,22 @@ pub struct ProxyNetworkInner<N> {
     time: Arc<dyn Time>,
     config: ProxyConfig,
     connections: ConnectionMap,
+    shutdown: Arc<ShutdownHandle>,
 }
 
 impl<N: Network> ProxyNetworkInner<N> {
-    pub fn new(config: ProxyConfig, network: N, time: Arc<dyn Time>) -> Self {
+    pub fn new(
+        config: ProxyConfig,
+        network: N,
+        time: Arc<dyn Time>,
+        shutdown: Arc<ShutdownHandle>,
+    ) -> Self {
         Self {
             network,
             time,
             config,
             connections: ConnectionMap::default(),
+            shutdown,
         }
     }
 
@@ -151,6 +164,7 @@ impl<N: Network> ProxyNetworkInner<N> {
                 conn_type,
                 Box::new(tunnled_stream),
                 &*self.time,
+                ShutdownSignal::from(&*self.shutdown),
             )
             .await?;
 

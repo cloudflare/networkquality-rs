@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 nq-core = { workspace = true }
+tracing =  { workspace = true }

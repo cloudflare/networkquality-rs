@@ -2,7 +2,7 @@
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use tokio::sync::oneshot;
+use shellflip::ShutdownSignal;
 
 use crate::{Network, Time};
 
@@ -16,6 +16,6 @@ pub trait Speedtest {
         self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        shutdown: oneshot::Receiver<()>,
+        shutdown: ShutdownSignal,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Self::TestResult>> + Send + 'static>>;
 }

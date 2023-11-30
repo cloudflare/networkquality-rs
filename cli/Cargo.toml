@@ -9,14 +9,17 @@ name = "mach"
 path = "./src/main.rs"
 
 [dependencies]
-nq-rpm = { workspace = true }
 nq-core = { workspace = true }
+nq-rpm = { workspace = true }
+nq-rtt = { workspace = true }
 nq-tokio-network = { workspace = true }
 
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+shellflip = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "macros",] }
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
-ureq = { workspace = true }
+ureq = { workspace = true, features = ["json"] }

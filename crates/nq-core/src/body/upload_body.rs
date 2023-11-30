@@ -5,6 +5,7 @@ use std::{
 };
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
+use tracing::trace;
 
 /// A body that continually uploads a chunk of the same bytes until
 /// it has sent a given number of bytes.
@@ -16,7 +17,7 @@ pub struct UploadBody {
 
 impl UploadBody {
     pub fn new(size: usize) -> Self {
-        const CHUNK_SIZE: usize = 1024 * 1024; // 1MB
+        const CHUNK_SIZE: usize = 256 * 1024; // 1MB
 
         UploadBody {
             remaining: size,
@@ -33,6 +34,12 @@ impl Body for UploadBody {
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        trace!(
+            "upload body poll_frame: remaing={}, chunk.len={}",
+            self.remaining,
+            self.chunk.len()
+        );
+
         Poll::Ready(match self.remaining {
             0 => None,
             remaining if remaining > self.chunk.len() => {
@@ -46,6 +53,10 @@ impl Body for UploadBody {
                 Some(Ok(Frame::data(self.chunk.slice(..remaining))))
             }
         })
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.remaining == 0
     }
 
     fn size_hint(&self) -> SizeHint {

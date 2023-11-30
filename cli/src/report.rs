@@ -1,61 +1,75 @@
-//! Structures and utilities for reporting data to Cloudflare's AIM aggregation.
-
+use anyhow::Context;
+use nq_rpm::ResponsivenessResult;
+use nq_rtt::RttResult;
 use serde::{Deserialize, Serialize};
 
-/// Describes the format of Cloudflare AIM results uploaded with test runs.
+use crate::util::{pretty_ms, pretty_secs_to_ms};
+
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CloudflareAimResults {
-    pub(crate) latency_ms: Vec<f64>,
-    pub(crate) download: Vec<BpsMeasurement>,
-    pub(crate) upload: Vec<BpsMeasurement>,
-    pub(crate) down_loaded_latency_ms: Vec<f64>,
-    pub(crate) up_loaded_latency_ms: Vec<f64>,
-    pub(crate) packet_loss: PacketLoss,
+pub struct Report {
+    unloaded_latency_ms: f64,
+    // todo(fisher): implement packet loss from tcp info.
+    // packet_loss: f64,
+    jitter_ms: f64,
+
+    download: RpmReport,
+    upload: RpmReport,
 }
 
-/// Describes the bits/s of some transfer.
-#[derive(Serialize, Deserialize)]
-pub struct BpsMeasurement {
-    /// The total number of bytes.
-    bytes: usize,
-    /// The bits per second of the transfer.
-    bps: usize,
-}
+impl Report {
+    pub fn from_rtt_and_rpm_results(
+        rtt_result: &RttResult,
+        download_rpm_result: &ResponsivenessResult,
+        upload_rpm_result: &ResponsivenessResult,
+    ) -> anyhow::Result<Self> {
+        let unloaded_latency_ms = pretty_secs_to_ms(
+            rtt_result
+                .measurements
+                .quantile(0.50)
+                .context("no unloaded latency measurements found")?,
+        );
 
-/// A measure of packet loss.
-#[derive(Serialize, Deserialize)]
-pub struct PacketLoss {
-    num_messages: usize,
-    loss_ration: f64,
-}
+        let jitter_ms = pretty_secs_to_ms(
+            rtt_result
+                .measurements
+                .std()
+                .context("no unloaded latency measurements")?,
+        );
 
-/// Default to 0% packet loss
-// todo(fisher): add network statistics as a part of the `Network` trait.
-impl Default for PacketLoss {
-    fn default() -> Self {
-        Self {
-            num_messages: 1000,
-            loss_ration: 0.0,
-        }
+        let download =
+            RpmReport::from_rpm_result(download_rpm_result).context("building download report")?;
+        let upload =
+            RpmReport::from_rpm_result(upload_rpm_result).context("building upload report")?;
+
+        Ok(Report {
+            unloaded_latency_ms,
+            jitter_ms,
+            download,
+            upload,
+        })
     }
 }
 
-/// Calculated AIM scores:
-/// https://developers.cloudflare.com/speed/aim/
 #[derive(Serialize, Deserialize)]
-#[allow(missing_docs)]
-pub enum AimScore {
-    Streaming {
-        points: usize,
-        classification: String,
-    },
-    Gaming {
-        points: usize,
-        classification: String,
-    },
-    Rtc {
-        points: usize,
-        classification: String,
-    },
+struct RpmReport {
+    throughput: usize,
+    loaded_latency_ms: f64,
+    rpm: usize,
+}
+
+impl RpmReport {
+    pub fn from_rpm_result(result: &ResponsivenessResult) -> anyhow::Result<RpmReport> {
+        Ok(RpmReport {
+            throughput: result
+                .average_goodput_series
+                .quantile(0.90)
+                .context("no throughputs available")? as usize,
+            loaded_latency_ms: result
+                .self_probe_latencies
+                .quantile(0.5)
+                .map(pretty_ms)
+                .context("no loaded latency measurements")?,
+            rpm: result.rpm as usize,
+        })
+    }
 }

@@ -9,13 +9,18 @@ use anyhow::Context;
 use http::{HeaderMap, HeaderValue, Uri};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Incoming};
+use shellflip::ShutdownSignal;
+use tokio::select;
 use tokio::sync::mpsc;
-use tracing::{error, info, Instrument};
+use tracing::{debug, error, info, Instrument};
 
 use crate::{
     body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
     oneshot_result, ConnectionId, ConnectionType, Network, OneshotResult, Time, Timestamp,
 };
+
+/// The default user agent for networkquality requests
+pub const MACH_USER_AGENT: &str = "mach/0.1.0";
 
 /// Describes the direction of the client. This determines if the client times
 /// the upload or download of a body.
@@ -82,12 +87,13 @@ impl ThroughputClient {
     }
 
     /// Execute a download or upload request against the given [`Uri`].
-    #[tracing::instrument(skip(self, network, time))]
+    #[tracing::instrument(skip(self, network, time, shutdown))]
     pub fn send(
         self,
         uri: Uri,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
+        mut shutdown: ShutdownSignal,
     ) -> anyhow::Result<OneshotResult<InflightBody>> {
         let mut headers = self.headers.unwrap_or_default();
 
@@ -96,11 +102,7 @@ impl ThroughputClient {
         }
 
         let host = uri.host().context("uri is missing a host")?.to_string();
-
-        let remote_addr = (host.as_str(), uri.port_u16().unwrap_or(443))
-            .to_socket_addrs()?
-            .next()
-            .context("could not resolve large download url")?;
+        let host_with_port = format!("{}:{}", host, uri.port_u16().unwrap_or(443));
 
         let method = match self.direction {
             Direction::Down => "GET",
@@ -108,16 +110,17 @@ impl ThroughputClient {
         };
 
         let (tx, rx) = oneshot_result();
-        let (events_tx, events_rx) = mpsc::channel(1024);
+        let mut events = None;
+        // let (events_tx, events_rx) = mpsc::channel(1024);
 
         let body: NqBody = match self.direction {
             Direction::Up(size) => {
                 tracing::debug!("tracking upload body");
                 let dummy_body = UploadBody::new(size);
 
-                let mut body =
-                    CountingBody::new(dummy_body, Duration::from_millis(100), Arc::clone(&time));
-                body.set_sender(events_tx);
+                let (body, events_rx) =
+                    CountingBody::new(dummy_body, Duration::from_millis(50), Arc::clone(&time));
+                events = Some(events_rx);
 
                 headers.insert("Content-Size", size.into());
                 headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
@@ -148,28 +151,40 @@ impl ThroughputClient {
 
                     (conn_id, None)
                 } else if let Some(conn_type) = self.new_connection_type {
-                    info!("creating new connection");
-                    let connection = network
-                        .new_connection(start, remote_addr, host, conn_type)
+                    info!("creating new connection to {host_with_port}");
+
+                    let addrs = network
+                        .resolve(host_with_port)
+                        .await
+                        .context("unable to resolve host")?;
+
+                    debug!("addrs: {addrs:?}");
+
+                    let time_lookup = time.now();
+
+                    let mut connection = network
+                        .new_connection(start, addrs[0], host, conn_type)
                         .await
                         .context("creating new connection")?;
+
+                    connection.timing.set_lookup(time_lookup);
 
                     (connection.id, Some(connection.timing))
                 } else {
                     todo!()
                 };
 
-                info!(?conn_id, "connection used");
+                debug!(?conn_id, "connection used");
                 let response_fut = network.send_request(conn_id, request);
 
                 let mut response_body = match self.direction {
                     Direction::Up(_) => {
-                        info!("sending upload events");
+                        debug!("sending upload events");
                         if tx
                             .send(Ok(InflightBody {
                                 conn_id,
                                 timing,
-                                events: events_rx,
+                                events: events.expect("events were set above"),
                                 start,
                                 headers,
                             }))
@@ -184,14 +199,13 @@ impl ThroughputClient {
                     Direction::Down => {
                         let (parts, incoming) = response_fut.await?.into_parts();
 
-                        let mut counting_body = CountingBody::new(
+                        let (counting_body, events) = CountingBody::new(
                             incoming,
                             Duration::from_millis(100),
                             Arc::clone(&time),
                         );
-                        let events = counting_body.subscribe();
 
-                        info!("sending download events");
+                        debug!("sending download events");
                         if tx
                             .send(Ok(InflightBody {
                                 conn_id,
@@ -214,10 +228,14 @@ impl ThroughputClient {
                         // Consume the response body and keep the connection
                         // alive. Stop if we hit an error.
                         info!("waiting for response body");
-                        while let Some(res) = response_body.frame().await {
-                            if let Err(e) = res {
-                                error!("body closing: {e}");
-                                break;
+
+                        loop {
+                            select! {
+                                Some(res) = response_body.frame() => if let Err(e) = res {
+                                    error!("body closing: {e}");
+                                    break;
+                                },
+                                _ = shutdown.on_shutdown() => break,
                             }
                         }
                     }
@@ -286,7 +304,7 @@ impl Client {
         let mut headers = self.headers.unwrap_or_default();
 
         if !headers.contains_key("User-Agent") {
-            headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
+            headers.insert("User-Agent", HeaderValue::from_static(MACH_USER_AGENT));
         }
 
         let host = uri.host().context("uri is missing a host")?.to_string();
@@ -305,7 +323,7 @@ impl Client {
 
         *request.headers_mut() = headers.clone();
 
-        info!("sending request");
+        debug!("sending request");
 
         let (tx, rx) = oneshot_result();
         tokio::spawn(
@@ -325,7 +343,7 @@ impl Client {
                     todo!()
                 };
 
-                info!(?conn_id, "connection used");
+                debug!(?conn_id, "connection used");
                 // todo(fisher): fine-grained send timings for requests
                 let mut response = network.send_request(conn_id, request).await?;
 
@@ -369,6 +387,7 @@ pub async fn wait_for_finish(
 }
 
 /// The result of [`wait_for_finish`]
+#[derive(Debug)]
 pub struct FinishResult {
     /// The total number of bytes seen by the body.
     pub total: usize,
