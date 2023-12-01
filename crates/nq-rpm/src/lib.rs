@@ -17,7 +17,7 @@ use nq_core::{ConnectionType, Speedtest, Time, Timestamp};
 use nq_stats::{instant_minus_intervals, TimeSeries};
 use shellflip::ShutdownSignal;
 use tokio::{select, sync::mpsc};
-use tracing::{debug, info, Instrument};
+use tracing::{debug, error, info, Instrument};
 use url::Url;
 
 pub use crate::load_generator::LoadedConnection;
@@ -50,13 +50,13 @@ impl ResponsivenessConfig {
 impl Default for ResponsivenessConfig {
     fn default() -> Self {
         Self {
-            large_download_url: "https://mensura.cdn-apple.com/api/v1/seed/large"
+            large_download_url: "https://aim.cloudflare.com/responsiveness/api/v1/large"
                 .parse()
                 .unwrap(),
-            small_download_url: "https://mensura.cdn-apple.com/api/v1/seed/small"
+            small_download_url: "https://aim.cloudflare.com/cdn-cgi/build/nginx-ssl"
                 .parse()
                 .unwrap(),
-            upload_url: "https://mensura.cdn-apple.com/api/v1/seed/slurp"
+            upload_url: "https://aim.cloudflare.com/responsiveness/api/v1/upload"
                 .parse()
                 .unwrap(),
             moving_average_distance: 4,
@@ -164,7 +164,7 @@ impl Responsiveness {
                             self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
                         }
                         Event::Error(e) => {
-                            println!("error: {e}");
+                            error!("error: {e}");
                         }
                     }
                 }
@@ -681,6 +681,14 @@ pub struct ResponsivenessResult {
     pub self_probe_latencies: TimeSeries,
     pub loaded_connections: Vec<LoadedConnection>,
     pub average_goodput_series: TimeSeries,
+}
+
+impl ResponsivenessResult {
+    pub fn throughput(&self) -> Option<usize> {
+        self.average_goodput_series
+            .quantile(0.90)
+            .map(|t| t as usize)
+    }
 }
 
 impl Display for ResponsivenessResult {

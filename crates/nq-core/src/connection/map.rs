@@ -40,7 +40,10 @@ impl ConnectionMap {
     ) -> anyhow::Result<NewConnection> {
         match conn_type {
             crate::ConnectionType::H1 => {
-                let connection = start_h1_conn(domain, timing, io, time, shutdown_signal).await?;
+                let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
+
+                let connection =
+                    start_h1_conn(domain, timing, stream, time, shutdown_signal).await?;
                 let timing = connection.timing();
 
                 let id = ConnectionId::new();

@@ -40,6 +40,28 @@ Use `mach help` to see a list of subcommands and `mach help <subcommand>` or
 
 ## Examples
 
+Running a responsiveness test:
+```shell
+mach rpm
+{
+  "unloaded_latency_ms": 10.819,
+  "jitter_ms": 6.945,
+  "download": {
+    "throughput": 104846062,
+    "loaded_latency_ms": 86.936,
+    "rpm": 446
+  },
+  "upload": {
+    "throughput": 48758784,
+    "loaded_latency_ms": 206.837,
+    "rpm": 433
+  }
+}
+```
+
+> By default this measures responsiveness against Cloudflare's responsiveness
+server.
+
 Running a responsiveness test with Apple's server: 
 ```shell
 mach rpm -c https://mensura.cdn-apple.com/.well-known/nq
@@ -52,20 +74,18 @@ mach download https://cloudflare.com/cdn-cgi/trace
 time_connect: 0.0531
  time_secure: 0.1144
     duration: 0.2224
+
          bps: 8130.7393
  bytes_total: 226
 ```
 
-> uploads still need to be implemented
-
-Timing the upload of 10MB of data:
+Measuring latency using TCP connection timing:
 ```shell
-mach upload --bytes 10000000 https://aim.cloudflare.com/responsiveness/api/v1/upload
-```
-
-Or time the upload of a file:
-```shell
-mach upload --file ./my-file.bin https://aim.cloudflare.com/responsiveness/api/v1/upload
+mach rtt
+{
+  "jitter_ms": 2.949,
+  "latency_ms": 10.549
+}
 ```
 
 ## Debugging
@@ -80,7 +100,7 @@ RUST_LOG=info mach
 # Architecture
 
 The main complexity in the repo is due to the `Network` and `Time` trait
-abstractions. We need those abstractions for two reasons. First it allows us to
+abstractions. We need those abstractions for two reasons. First, it allows us to
 abstract over the underlying request/response implementation which will help
 with WASM/browser support in the future. Second, we use the network abstraction
 to define a Proxy network. This allows us to not only directly test H1, H2, or
@@ -112,27 +132,34 @@ directory. They are combined together to form the `mach` cli under `./cli`.
 - `nq-stats`: provides `Timeseries` and `Counter` types for storing measurements
   and running simple statisitcs on those series.
 
-- `nq-rpm`: the implementation of the ["Responsiveness under Working
+- `nq-rpm`: a speedtest which implements the ["Responsiveness under Working
   Conditions"](draft) draft.
+
+- `nq-latency`: a speedtest which measures latency by timing how long it takes
+  to setup multiple TCP connections.
 
 # TODOs
 
 - [ ] implement upload command.
-- [ ] time DNS resolution.
+  - [ ] uploading a given number of bytes.
+  - [ ] uploading arbitrary files.
+- [x] time DNS resolution.
+- [ ] better TUI experience for all commands.
 - [ ] QUIC support.
 - [ ] MASQUE proxying support.
     - [ ] support RPK TLS.
 - [ ] Output format:
-    - [ ] JSON
+    - [x] JSON
+      - [ ] determine stability / extensions.
     - [ ] Human output
-- [ ] Send AIM score reports
+- [x] send AIM score reports
 - [ ] automated testing
     - [ ] latency comparisions with curl
     - [ ] RPM comparisions with different tools against the same server
-    - [ ] review/better test the statistics (?)
-- [ ] socket stats for a connection
-- RPM stability decreases as interval duration decreases. Look into calculating
+    - [ ] review/better test statistics
+- [ ] socket stats for measuring connection throughput
+- [ ] RPM stability decreases as interval duration decreases. Look into calculating
   a better `CountingBody` update rate.
-- Properly signal the connections on a network to shutdown.
+- [x] Properly signal the connections on a network to shutdown.
 
 [draft]: https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03

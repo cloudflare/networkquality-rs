@@ -4,15 +4,14 @@ pub(crate) mod up_down;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::args::rpm::RpmArgs;
-use crate::args::up_down::{DownloadArgs, UploadArgs};
+use crate::args::up_down::DownloadArgs;
 
 ///
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
-    /// Use verbose output
-    #[clap(short, long)]
-    pub verbose: bool,
+    #[command(flatten)]
+    pub verbosity: clap_verbosity_flag::Verbosity,
     #[clap(subcommand)]
     pub command: Option<Command>,
     // todo(fisher): figure out proxies
@@ -33,13 +32,15 @@ pub enum Command {
     Download(DownloadArgs),
     /// Upload data (POST) to an endpoint,  reporting latency measurements and total
     /// throughput.
-    Upload(UploadArgs),
-    /// Determine RTT using the time it takes to establish a TCP connection.
+    // Upload(UploadArgs),
+    /// Determine the Round-Trip-Time (RTT), or latency, of a link using the
+    /// time it takes to establish a TCP connection.
+    ///
     /// This is not a perfect measurement of RTT, but it's close.
     Rtt {
         /// The URL to perform a GET request against. The full GET time is not
         /// measured, just the TCP handshake.
-        #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/upload")]
+        #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/small")]
         #[clap(short, long)]
         url: String,
         /// How many measurements to perform.

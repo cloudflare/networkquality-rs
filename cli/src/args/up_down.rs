@@ -1,7 +1,5 @@
 //! Arguments for running simple upload and download tests.
 
-use std::path::PathBuf;
-
 use clap::Args;
 
 use crate::args::ConnType;
@@ -34,8 +32,8 @@ pub struct UploadArgs {
     #[clap(short, long)]
     pub(crate) bytes: Option<usize>,
     /// Upload the contents of a file. Only one of `bytes` or `file` can be set.
-    #[clap(short, long)]
-    pub(crate) file: Option<PathBuf>,
+    // #[clap(short, long)]
+    // pub(crate) file: Option<PathBuf>,
     /// Headers to add to the request.
     #[clap(short = 'H', long = "header")]
     pub(crate) headers: Vec<String>,

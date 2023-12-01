@@ -143,9 +143,9 @@ impl TokioNetworkInner {
         let mut timing = ConnectionTiming::new(start);
 
         let tcp_stream = TcpStream::connect(remote_addr).await?;
-        tcp_stream.set_nodelay(false).unwrap();
-
         timing.set_connect(self.time.now());
+
+        tcp_stream.set_nodelay(false).unwrap();
 
         let connection = self
             .connections

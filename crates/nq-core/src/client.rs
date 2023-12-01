@@ -111,7 +111,6 @@ impl ThroughputClient {
 
         let (tx, rx) = oneshot_result();
         let mut events = None;
-        // let (events_tx, events_rx) = mpsc::channel(1024);
 
         let body: NqBody = match self.direction {
             Direction::Up(size) => {
@@ -122,7 +121,7 @@ impl ThroughputClient {
                     CountingBody::new(dummy_body, Duration::from_millis(50), Arc::clone(&time));
                 events = Some(events_rx);
 
-                headers.insert("Content-Size", size.into());
+                headers.insert("Content-Length", size.into());
                 headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
 
                 body.boxed()
@@ -193,7 +192,9 @@ impl ThroughputClient {
                             error!("error sending upload events");
                         }
 
-                        let (_, incoming) = response_fut.await?.into_parts();
+                        let (parts, incoming) = response_fut.await?.into_parts();
+                        info!("upload response parts: {:?}", parts);
+
                         incoming.boxed()
                     }
                     Direction::Down => {

@@ -1,6 +1,6 @@
 use anyhow::Context;
+use nq_latency::LatencyResult;
 use nq_rpm::ResponsivenessResult;
-use nq_rtt::RttResult;
 use serde::{Deserialize, Serialize};
 
 use crate::util::{pretty_ms, pretty_secs_to_ms};
@@ -18,23 +18,16 @@ pub struct Report {
 
 impl Report {
     pub fn from_rtt_and_rpm_results(
-        rtt_result: &RttResult,
+        rtt_result: &LatencyResult,
         download_rpm_result: &ResponsivenessResult,
         upload_rpm_result: &ResponsivenessResult,
     ) -> anyhow::Result<Self> {
-        let unloaded_latency_ms = pretty_secs_to_ms(
-            rtt_result
-                .measurements
-                .quantile(0.50)
-                .context("no unloaded latency measurements found")?,
-        );
+        let unloaded_latency_ms = rtt_result
+            .median()
+            .map(pretty_secs_to_ms)
+            .context("no unloaded latency measurements")?;
 
-        let jitter_ms = pretty_secs_to_ms(
-            rtt_result
-                .measurements
-                .std()
-                .context("no unloaded latency measurements")?,
-        );
+        let jitter_ms = rtt_result.jitter().map(pretty_secs_to_ms).unwrap_or(0.0);
 
         let download =
             RpmReport::from_rpm_result(download_rpm_result).context("building download report")?;
@@ -60,10 +53,7 @@ struct RpmReport {
 impl RpmReport {
     pub fn from_rpm_result(result: &ResponsivenessResult) -> anyhow::Result<RpmReport> {
         Ok(RpmReport {
-            throughput: result
-                .average_goodput_series
-                .quantile(0.90)
-                .context("no throughputs available")? as usize,
+            throughput: result.throughput().context("no throughputs available")?,
             loaded_latency_ms: result
                 .self_probe_latencies
                 .quantile(0.5)

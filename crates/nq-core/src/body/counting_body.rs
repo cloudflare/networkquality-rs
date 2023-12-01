@@ -2,7 +2,7 @@ use std::{sync::Arc, task::Poll, time::Duration};
 
 use hyper::body::{Body, Bytes};
 use tokio::sync::mpsc;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 use crate::{Time, Timestamp};
 
@@ -34,6 +34,7 @@ pin_project_lite::pin_project! {
         update_every: Duration,
         total: usize,
         events_tx: mpsc::Sender<BodyEvent>,
+        sent_finished: bool,
     }
 }
 
@@ -64,6 +65,7 @@ impl<B> CountingBody<B> {
                 update_every,
                 total: 0,
                 events_tx,
+                sent_finished: false,
             },
             events_rx,
         )
@@ -133,13 +135,18 @@ where
                 debug!(?event, "sending event");
                 let _ = this.events_tx.try_send(event);
 
-                debug!(at=?now, "sending finished");
-                let _ = this.events_tx.try_send(BodyEvent::Finished { at: now });
+                if !*this.sent_finished {
+                    debug!(at=?now, "sending finished");
+                    let _ = this.events_tx.try_send(BodyEvent::Finished { at: now });
+                    *this.sent_finished = true;
+                } else {
+                    debug!("already sent finish");
+                }
 
                 Poll::Ready(None)
             }
             Poll::Ready(Some(Err(e))) => {
-                trace!(error=?e, "body errored");
+                error!(error=?e, "body errored");
                 Poll::Ready(Some(Err(e)))
             }
             Poll::Pending => {

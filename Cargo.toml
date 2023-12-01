@@ -12,13 +12,14 @@ nq-core = { path = "./crates/nq-core" }
 nq-stats = { path = "./crates/nq-stats" }
 nq-proxy-network = { path = "./crates/nq-proxy-network" }
 nq-rpm = { path = "./crates/nq-rpm" }
-nq-rtt = { path = "./crates/nq-rtt" }
+nq-latency = { path = "./crates/nq-latency" }
 nq-tokio-network = { path = "./crates/nq-tokio-network" }
 
 anyhow = "1.0"
 async-trait = { version = "0.1" }
 boring = { git = "https://github.com/cloudflare/boring", rev = "abfe2f798094d8b5855592aec8b5b90e3c2197e2" }
 clap = "4.3"
+clap-verbosity-flag = "2.1"
 http = "1.0"
 http-body-util = "0.1.0-rc.3"
 hyper = "1.0"

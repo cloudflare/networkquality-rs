@@ -5,6 +5,7 @@ use nq_core::client::{wait_for_finish, ThroughputClient};
 use nq_core::{ConnectionType, Network, StdTime, Time};
 use nq_tokio_network::TokioNetwork;
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
+use tracing::info;
 
 use crate::args::up_down::{DownloadArgs, UploadArgs};
 use crate::args::ConnType;
@@ -19,15 +20,17 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     )) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
-        ConnType::H1 => unimplemented!("H1 is not yet implemented"), // ConnectionType::H1,
+        ConnType::H1 => ConnectionType::H1,
         ConnType::H2 => ConnectionType::H2,
         ConnType::H3 => unimplemented!("H3 is not yet implemented"), // ConnectionType::H3,
     };
 
+    info!("downloading: {}", args.url);
+
     let inflight_body = ThroughputClient::download()
         .new_connection(conn_type)
         .send(
-            args.url.parse()?,
+            args.url.parse().context("parsing download url")?,
             Arc::clone(&network),
             Arc::clone(&time),
             ShutdownSignal::from(&*shutdown_coordinator.handle()),
@@ -66,6 +69,9 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 }
 
 /// Run a download test.
+// todo(fisher): investigate body completion events. Moving to Socket stats is
+// likely the best option.
+#[allow(dead_code)]
 pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let shutdown_coordinator = ShutdownCoordinator::default();
     let time = Arc::new(StdTime) as Arc<dyn Time>;
@@ -75,12 +81,16 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     )) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
-        ConnType::H1 => unimplemented!("H1 is not yet implemented"), // ConnectionType::H1,
+        ConnType::H1 => ConnectionType::H1, // ConnectionType::H1,
         ConnType::H2 => ConnectionType::H2,
         ConnType::H3 => unimplemented!("H3 is not yet implemented"), // ConnectionType::H3,
     };
 
-    let inflight_body = ThroughputClient::upload(args.bytes.unwrap_or(1_000_000_000))
+    let bytes = args.bytes.unwrap_or(10_000_000);
+
+    println!("{}\n", args.url);
+
+    let inflight_body = ThroughputClient::upload(bytes)
         .new_connection(conn_type)
         .send(
             args.url.parse()?,

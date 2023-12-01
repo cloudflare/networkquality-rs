@@ -59,8 +59,13 @@ pub struct RpmArgs {
     #[clap(long = "interval-duration", default_value = "1000")]
     pub interval_duration_ms: u64,
     /// The overall test duration in milliseconds (ms).
-    #[clap(long = "test-duration", default_value = "10000")]
+    #[clap(long = "test-duration", default_value = "12000")]
     pub test_duration_ms: u64,
+    /// Disable AIM score reporting.
+    ///
+    /// https://blog.cloudflare.com/aim-database-for-internet-quality/
+    #[clap(long)]
+    pub disable_aim_scores: bool,
 }
 
 impl Default for RpmArgs {
@@ -75,8 +80,9 @@ impl Default for RpmArgs {
             std_tolerance: 0.05,
             trimmed_mean_percent: 0.95,
             max_loaded_connections: 16,
-            interval_duration_ms: 500, // 1s
-            test_duration_ms: 10_000,  // 10s
+            interval_duration_ms: 1000, // 1s
+            test_duration_ms: 12_000,   // 12s
+            disable_aim_scores: false,
         }
     }
 }

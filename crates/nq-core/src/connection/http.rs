@@ -57,6 +57,8 @@ pub async fn tls_connection(
     time: &dyn Time,
 ) -> anyhow::Result<TlsStream> {
     let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+
+    builder.cert_store_mut().set_default_paths()?;
     builder.set_verify(SslVerifyMode::PEER);
 
     let alpn: &[u8] = match conn_type {
@@ -94,7 +96,7 @@ pub async fn start_h1_conn(
         async move {
             select! {
                 Err(e) = connection => {
-                    error!(error=%e, "error running connection");
+                    error!(error=%e, "error running h1 connection");
                 }
                 _ = shutdown_signal.on_shutdown() => {
                     debug!("shutting down h1 connection");
@@ -134,7 +136,7 @@ pub async fn start_h2_conn(
         async move {
             select! {
                 Err(e) = connection => {
-                    error!(error=%e, "error running connection");
+                    error!(error=%e, "error running h2 connection");
                 }
                 _ = shutdown_signal.on_shutdown() => {
                     debug!("shutting down h2 connection");

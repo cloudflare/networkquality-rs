@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use nq_core::{Network, Speedtest, StdTime, Time};
+use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
-use nq_rtt::RttConfig;
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
@@ -14,25 +14,50 @@ use tracing::{debug, error, info};
 use crate::aim_report::CloudflareAimResults;
 use crate::args::rpm::RpmArgs;
 use crate::report::Report;
+use crate::util::pretty_secs_to_ms;
 
 /// Run a responsiveness test.
 pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
+    info!("running responsiveness test");
+
+    let rpm_urls = match cli_config.config.clone() {
+        Some(endpoint) => {
+            info!("fetching configuration from {endpoint}");
+            let urls = get_rpm_config(endpoint).await?.urls;
+            info!("retrieved configuration urls: {urls:?}");
+
+            urls
+        }
+        None => {
+            let urls = RpmUrls {
+                small_https_download_url: cli_config.small_download_url,
+                large_https_download_url: cli_config.large_download_url,
+                https_upload_url: cli_config.upload_url,
+            };
+            info!("using default configuration urls: {urls:?}");
+
+            urls
+        }
+    };
+
     // first get unloaded RTT measurements
-    info!("determining rtt");
-    let rtt_result = crate::rtt::run_test(&RttConfig {
-        url: cli_config.small_download_url.parse()?,
+    info!("determining unloaded latency");
+    let rtt_result = crate::latency::run_test(&LatencyConfig {
+        url: rpm_urls.small_https_download_url.parse()?,
         runs: 20,
     })
     .await?;
-
-    let rpm_urls = match cli_config.config {
-        Some(endpoint) => get_rpm_config(endpoint).await?.urls,
-        None => RpmUrls {
-            small_https_download_url: cli_config.small_download_url,
-            large_https_download_url: cli_config.large_download_url,
-            https_upload_url: cli_config.upload_url,
-        },
-    };
+    info!(
+        "unloaded latency: {} ms. jitter: {} ms",
+        rtt_result
+            .median()
+            .map(pretty_secs_to_ms)
+            .unwrap_or_default(),
+        rtt_result
+            .jitter()
+            .map(pretty_secs_to_ms)
+            .unwrap_or_default(),
+    );
 
     let config = ResponsivenessConfig {
         large_download_url: rpm_urls.large_https_download_url.parse()?,
@@ -54,13 +79,19 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     let upload_result = run_test(&config, false).await?;
     debug!("upload result={upload_result:?}");
 
-    let aim_results =
-        CloudflareAimResults::from_rpm_results(&rtt_result, &download_result, &upload_result);
+    let aim_results = CloudflareAimResults::from_rpm_results(
+        &rtt_result,
+        &download_result,
+        &upload_result,
+        cli_config.config,
+    );
 
-    debug!("uploading report");
     let upload_handle = tokio::spawn(async move {
-        if let Err(e) = aim_results.upload().await {
-            error!("error uploading aim results: {e}");
+        if !cli_config.disable_aim_scores {
+            debug!("uploading aim report");
+            if let Err(e) = aim_results.upload().await {
+                error!("error uploading aim results: {e}");
+            }
         }
     });
 

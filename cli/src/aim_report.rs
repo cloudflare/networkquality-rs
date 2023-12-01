@@ -1,12 +1,12 @@
 //! Structures and utilities for reporting data to Cloudflare's AIM aggregation.
 
 use nq_core::client::MACH_USER_AGENT;
+use nq_latency::LatencyResult;
 use nq_rpm::{LoadedConnection, ResponsivenessResult};
-use nq_rtt::RttResult;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::debug;
 
-use crate::util::pretty_ms;
+use crate::util::{pretty_ms, pretty_secs_to_ms};
 
 /// Describes the format of Cloudflare AIM results uploaded with test runs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,18 +19,21 @@ pub struct CloudflareAimResults {
     pub(crate) up_loaded_latency_ms: Vec<f64>,
     pub(crate) packet_loss: PacketLoss,
     pub(crate) responsiveness: f64,
+    #[serde(skip)]
+    origin: String,
 }
 
 impl CloudflareAimResults {
     pub fn from_rpm_results(
-        rtt_result: &RttResult,
+        rtt_result: &LatencyResult,
         download_result: &ResponsivenessResult,
         upload_result: &ResponsivenessResult,
+        config_url: Option<String>,
     ) -> CloudflareAimResults {
         let latency_ms = rtt_result
             .measurements
             .values()
-            .map(|ms| ms * 1_000.0)
+            .map(pretty_secs_to_ms)
             .collect();
 
         let mut download =
@@ -64,16 +67,18 @@ impl CloudflareAimResults {
             up_loaded_latency_ms,
             packet_loss,
             responsiveness: download_result.rpm,
+            origin: config_url.unwrap_or_else(|| "https://speed.cloudflare.com".to_string()),
         }
     }
 
     pub async fn upload(&self) -> anyhow::Result<()> {
         let results = self.clone();
+        let origin = self.origin.clone();
 
         let response = tokio::task::spawn_blocking(move || {
             match ureq::post("https://aim.cloudflare.com/__log")
                 .set("User-Agent", MACH_USER_AGENT)
-                .set("Origin", "https://speed.cloudflare.com")
+                .set("Origin", &origin)
                 .send_json(results)
             {
                 Err(ureq::Error::Status(_, resp)) => Ok(resp),
@@ -85,7 +90,7 @@ impl CloudflareAimResults {
         let (status, status_text) = (response.status(), response.status_text().to_string());
         let body = response.into_string()?;
 
-        info!("aim upload response: {status} ({status_text}); {body}");
+        debug!("aim upload response: {status} ({status_text}); {body}");
 
         if status != 200 {
             anyhow::bail!("error uploading aim results");
@@ -123,8 +128,10 @@ impl BpsMeasurement {
 
     /// Use the test duration and network capacity to create a synthetic bps result.
     fn from_rpm_result(rpm_result: &ResponsivenessResult) -> BpsMeasurement {
-        let bytes = rpm_result.capacity * rpm_result.duration.as_secs_f64();
-        let bps = rpm_result.capacity as usize;
+        let throughput = rpm_result.throughput().unwrap_or(0) as f64;
+
+        let bytes = throughput * rpm_result.duration.as_secs_f64();
+        let bps = throughput as usize;
 
         BpsMeasurement {
             bytes: bytes as usize,
