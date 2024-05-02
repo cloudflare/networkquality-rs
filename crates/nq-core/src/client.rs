@@ -368,7 +368,7 @@ impl Client {
 /// Consumes body events until the body is finished and returns
 /// the time at which the body finished.
 pub async fn wait_for_finish(
-    mut body_events: mpsc::Receiver<BodyEvent>,
+    mut body_events: mpsc::UnboundedReceiver<BodyEvent>,
 ) -> anyhow::Result<FinishResult> {
     let mut body_total = 0;
 
