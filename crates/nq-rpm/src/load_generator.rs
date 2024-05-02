@@ -11,7 +11,7 @@ use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
 use shellflip::ShutdownSignal;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{UnboundedReceiver};
 use tracing::Instrument;
 
 #[derive(Debug, Deserialize)]
@@ -135,7 +135,7 @@ impl LoadGenerator {
 #[derive(Debug)]
 pub struct LoadedConnection {
     conn_id: ConnectionId,
-    events_rx: Receiver<BodyEvent>,
+    events_rx: UnboundedReceiver<BodyEvent>,
     total_bytes_series: CounterSeries,
     finished_at: Option<Timestamp>,
 }
