@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use nq_core::{Network, StdTime, Time};
+use nq_core::{Network, Time, TokioTime};
 use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;

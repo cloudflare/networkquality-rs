@@ -18,7 +18,6 @@ pub use crate::{
     body::{BodyEvent, CountingBody, NqBody},
     connection::{ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType, NewConnection},
     network::Network,
-    speedtest::Speedtest,
     time::{Time, Timestamp, TokioTime},
     upgraded::ConnectUpgraded,
     util::{oneshot_result, OneshotResult, ResponseFuture},
