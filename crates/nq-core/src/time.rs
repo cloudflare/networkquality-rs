@@ -4,8 +4,6 @@
 
 use std::ops::{Add, Sub};
 use std::{
-    future::Future,
-    pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -84,15 +82,10 @@ impl Sub<Duration> for Timestamp {
     }
 }
 
-pub type Sleep = Pin<Box<dyn Future<Output = ()> + Send + Sync>>;
-
-/// An abstraction over time. Provides the ability to create a timestamp and to
-/// sleep for a given duration.
+/// An abstraction over time. Provides the ability to create a timestamp.
 pub trait Time: Send + Sync {
     /// The current time.
     fn now(&self) -> Timestamp;
-    /// Sleep for the given duration.
-    fn sleep(&self, duration: Duration) -> Sleep;
 }
 
 impl<T: Time> Time for Arc<T>
@@ -101,10 +94,6 @@ where
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
-    }
-
-    fn sleep(&self, duration: Duration) -> Sleep {
-        <T as Time>::sleep(self, duration)
     }
 }
 
@@ -115,10 +104,6 @@ where
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
     }
-
-    fn sleep(&self, duration: Duration) -> Sleep {
-        <T as Time>::sleep(self, duration)
-    }
 }
 
 impl<T: Time> Time for &T
@@ -127,10 +112,6 @@ where
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
-    }
-
-    fn sleep(&self, duration: Duration) -> Sleep {
-        <T as Time>::sleep(self, duration)
     }
 }
 
@@ -170,10 +151,6 @@ impl Time for TokioTime {
 
         self.base_timestamp + elapsed
     }
-
-    fn sleep(&self, duration: Duration) -> Sleep {
-        Box::pin(tokio::time::sleep(duration))
-    }
 }
 
 /// An implementation of [`Time`] based off of the rust standard library. For
@@ -183,9 +160,5 @@ pub struct StdTime;
 impl Time for StdTime {
     fn now(&self) -> Timestamp {
         Timestamp::from_system_time(SystemTime::now())
-    }
-
-    fn sleep(&self, duration: Duration) -> Sleep {
-        Box::pin(tokio::time::sleep(duration))
     }
 }
