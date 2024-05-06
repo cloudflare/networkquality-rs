@@ -20,7 +20,7 @@ pub use crate::{
     connection::{ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType, NewConnection},
     network::Network,
     speedtest::Speedtest,
-    time::{StdTime, Time, Timestamp, TokioTime},
+    time::{Time, Timestamp, TokioTime},
     upgraded::ConnectUpgraded,
     util::{oneshot_result, OneshotResult, ResponseFuture},
 };

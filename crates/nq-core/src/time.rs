@@ -5,7 +5,7 @@
 use std::ops::{Add, Sub};
 use std::{
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration},
 };
 
 use tokio::time::Instant;
@@ -25,20 +25,6 @@ impl Timestamp {
     /// Calculate the duration elapsed since the creation of this timestamp.
     pub fn elapsed(&self, time: &dyn Time) -> Duration {
         self.duration_since(time.now())
-    }
-
-    /// Create a [`Timestamp`] from a [`SystemTime`].
-    pub fn from_system_time(time: SystemTime) -> Self {
-        let duration = time
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default();
-
-        Timestamp::from(duration.as_micros() as u64)
-    }
-
-    /// Create a [`Timestamp`] from [`SystemTime::now`].
-    pub fn now_std() -> Self {
-        Timestamp::from_system_time(SystemTime::now())
     }
 }
 
@@ -126,7 +112,7 @@ impl TokioTime {
     /// Creates a new [`TokioTime`].
     pub fn new() -> Self {
         let base_instant = tokio::time::Instant::now();
-        let base_timestamp = Timestamp::from_system_time(SystemTime::now());
+        let base_timestamp = Timestamp(0);
 
         Self {
             base_instant,
@@ -150,15 +136,5 @@ impl Time for TokioTime {
             .expect("tokio::time::Instant went back in time");
 
         self.base_timestamp + elapsed
-    }
-}
-
-/// An implementation of [`Time`] based off of the rust standard library. For
-/// now, it still uses tokio for sleep purposes.
-pub struct StdTime;
-
-impl Time for StdTime {
-    fn now(&self) -> Timestamp {
-        Timestamp::from_system_time(SystemTime::now())
     }
 }

@@ -2,13 +2,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use nq_core::{Network, Speedtest, StdTime, Time};
+use nq_core::{Network, Speedtest, Time, TokioTime};
 use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
-use tokio::time::timeout;
+use tokio::time::{timeout};
 use tracing::{debug, error, info};
 
 use crate::aim_report::CloudflareAimResults;
@@ -111,7 +111,7 @@ async fn run_test(
     download: bool,
 ) -> anyhow::Result<ResponsivenessResult> {
     let shutdown_coordinator = ShutdownCoordinator::default();
-    let time = Arc::new(StdTime) as Arc<dyn Time>;
+    let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
         shutdown_coordinator.handle(),
