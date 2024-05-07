@@ -10,7 +10,6 @@ mod body;
 pub mod client;
 mod connection;
 mod network;
-mod speedtest;
 mod time;
 mod upgraded;
 mod util;
@@ -19,7 +18,6 @@ pub use crate::{
     body::{BodyEvent, CountingBody, NqBody},
     connection::{ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType, NewConnection},
     network::Network,
-    speedtest::Speedtest,
     time::{StdTime, Time, Timestamp, TokioTime},
     upgraded::ConnectUpgraded,
     util::{oneshot_result, OneshotResult, ResponseFuture},

@@ -5,7 +5,6 @@ use std::{
     fmt::{Debug, Display},
     future::Future,
     ops::Div,
-    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -13,7 +12,7 @@ use std::{
 use humansize::{format_size, DECIMAL};
 use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{client::wait_for_finish, Network};
-use nq_core::{ConnectionType, Speedtest, Time, Timestamp};
+use nq_core::{ConnectionType, Time, Timestamp};
 use nq_stats::{instant_minus_intervals, TimeSeries};
 use shellflip::ShutdownSignal;
 use tokio::{select, sync::mpsc};
@@ -119,7 +118,7 @@ impl Responsiveness {
     ///
     /// When the test completes or the test has been running too long, the test
     /// completes and the results are reported.
-    async fn run_test(
+    pub async fn run_test(
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
@@ -548,19 +547,6 @@ impl Responsiveness {
 async fn report_err(event_tx: mpsc::Sender<Event>, f: impl Future<Output = anyhow::Result<()>>) {
     if let Err(e) = f.await {
         let _ = event_tx.send(Event::Error(e)).await;
-    }
-}
-
-impl Speedtest for Responsiveness {
-    type TestResult = ResponsivenessResult;
-
-    fn run(
-        self,
-        network: Arc<dyn Network>,
-        time: Arc<dyn Time>,
-        shutdown: ShutdownSignal,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<ResponsivenessResult>> + Send + 'static>> {
-        Box::pin(Responsiveness::run_test(self, network, time, shutdown))
     }
 }
 
