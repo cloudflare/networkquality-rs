@@ -1,10 +1,10 @@
-use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use anyhow::Context;
 use http::Request;
 use http_body_util::BodyExt;
 use nq_core::Network;
-use nq_core::{ConnectionType, Speedtest, Time, Timestamp};
+use nq_core::{ConnectionType, Time, Timestamp};
 use nq_stats::TimeSeries;
 use shellflip::ShutdownSignal;
 use tracing::info;
@@ -42,7 +42,7 @@ impl Latency {
         }
     }
 
-    async fn run_test(
+    pub async fn run_test(
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
@@ -112,19 +112,6 @@ impl Latency {
         Ok(LatencyResult {
             measurements: self.probe_results,
         })
-    }
-}
-
-impl Speedtest for Latency {
-    type TestResult = LatencyResult;
-
-    fn run(
-        self,
-        network: Arc<dyn Network>,
-        time: Arc<dyn Time>,
-        shutdown: ShutdownSignal,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<LatencyResult>> + Send + 'static>> {
-        Box::pin(Latency::run_test(self, network, time, shutdown))
     }
 }
 

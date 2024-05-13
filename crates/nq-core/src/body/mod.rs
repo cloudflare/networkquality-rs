@@ -28,6 +28,6 @@ pub struct InflightBody {
     pub start: Timestamp,
     pub conn_id: ConnectionId,
     pub timing: Option<ConnectionTiming>,
-    pub events: mpsc::Receiver<BodyEvent>,
+    pub events: mpsc::UnboundedReceiver<BodyEvent>,
     pub headers: HeaderMap<HeaderValue>,
 }

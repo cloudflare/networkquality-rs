@@ -33,7 +33,7 @@ pin_project_lite::pin_project! {
         last_sent: Timestamp,
         update_every: Duration,
         total: usize,
-        events_tx: mpsc::Sender<BodyEvent>,
+        events_tx: mpsc::UnboundedSender<BodyEvent>,
         sent_finished: bool,
     }
 }
@@ -46,12 +46,12 @@ impl<B> CountingBody<B> {
         inner: B,
         update_every: Duration,
         time: Arc<dyn Time>,
-    ) -> (Self, mpsc::Receiver<BodyEvent>) {
-        let (events_tx, events_rx) = mpsc::channel(1024);
+    ) -> (Self, mpsc::UnboundedReceiver<BodyEvent>) {
+        let (events_tx, events_rx) = mpsc::unbounded_channel();
         let last_sent = time.now();
 
         events_tx
-            .try_send(BodyEvent::ByteCount {
+            .send(BodyEvent::ByteCount {
                 at: last_sent,
                 total: 0,
             })
@@ -117,7 +117,7 @@ where
                     // We can drop the error here since this is an
                     // increasing counter. The next send will hopefully
                     // capture it.
-                    let _ = this.events_tx.try_send(event);
+                    let _ = this.events_tx.send(event);
                 }
 
                 Poll::Ready(Some(Ok(frame)))
@@ -133,11 +133,11 @@ where
                 };
 
                 debug!(?event, "sending event");
-                let _ = this.events_tx.try_send(event);
+                let _ = this.events_tx.send(event);
 
                 if !*this.sent_finished {
                     debug!(at=?now, "sending finished");
-                    let _ = this.events_tx.try_send(BodyEvent::Finished { at: now });
+                    let _ = this.events_tx.send(BodyEvent::Finished { at: now });
                     *this.sent_finished = true;
                 } else {
                     debug!("already sent finish");

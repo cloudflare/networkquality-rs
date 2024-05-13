@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use nq_core::{Network, Speedtest, Time, TokioTime};
+use nq_core::{Network, StdTime, Time};
 use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
@@ -118,13 +118,7 @@ async fn run_test(
     )) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
-    let result = rpm
-        .run(
-            Arc::clone(&network),
-            Arc::clone(&time),
-            ShutdownSignal::from(&*shutdown_coordinator.handle()),
-        )
-        .await?;
+    let result = rpm.run_test(network, time, ShutdownSignal::from(&*shutdown_coordinator.handle())).await?;
 
     debug!("shutting down rpm test");
     shutdown_coordinator.shutdown_with_timeout(1).await;

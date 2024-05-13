@@ -10,7 +10,6 @@ mod body;
 pub mod client;
 mod connection;
 mod network;
-mod speedtest;
 mod time;
 mod upgraded;
 mod util;
