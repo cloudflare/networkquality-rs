@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use nq_core::{Network, Speedtest, Time, TokioTime};
+use nq_core::{Network, Time, TokioTime};
 use nq_latency::{Latency, LatencyConfig, LatencyResult};
 use nq_tokio_network::TokioNetwork;
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
