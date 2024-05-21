@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use nq_core::{Network, StdTime, Time};
+use nq_core::{Network, Time, TokioTime};
 use nq_latency::{Latency, LatencyConfig, LatencyResult};
 use nq_tokio_network::TokioNetwork;
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
@@ -41,7 +41,7 @@ pub async fn run(url: String, runs: usize) -> anyhow::Result<()> {
 
 pub async fn run_test(config: &LatencyConfig) -> anyhow::Result<LatencyResult> {
     let shutdown_coordinator = ShutdownCoordinator::default();
-    let time = Arc::new(StdTime) as Arc<dyn Time>;
+    let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
         shutdown_coordinator.handle(),

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use nq_core::client::{wait_for_finish, ThroughputClient};
-use nq_core::{ConnectionType, Network, StdTime, Time};
+use nq_core::{ConnectionType, Network, Time, TokioTime};
 use nq_tokio_network::TokioNetwork;
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
 use tracing::info;
@@ -13,7 +13,7 @@ use crate::args::ConnType;
 /// Run a download test.
 pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let shutdown_coordinator = ShutdownCoordinator::default();
-    let time = Arc::new(StdTime) as Arc<dyn Time>;
+    let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
         shutdown_coordinator.handle(),
@@ -74,7 +74,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 #[allow(dead_code)]
 pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let shutdown_coordinator = ShutdownCoordinator::default();
-    let time = Arc::new(StdTime) as Arc<dyn Time>;
+    let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
         shutdown_coordinator.handle(),
