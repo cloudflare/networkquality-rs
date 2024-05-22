@@ -3,40 +3,47 @@
 //! tokio, system and in the future, wasi/wasm based time implementations.
 
 use std::ops::{Add, Sub};
-use std::{
-    sync::Arc,
-    time::{Duration},
-};
-
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::time::Instant;
 
-/// A UNIX epoch timestamp with microsecond granularity.
+/// A timestamp with `Instant` for precise time measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Timestamp(u64);
+pub struct Timestamp(Instant);
 
 impl Timestamp {
-    const EPOCH: Timestamp = Timestamp(0);
-
     /// Calculate the saturating duration since an earlier timestamp.
     pub fn duration_since(&self, earlier: Timestamp) -> Duration {
-        Duration::from_micros(self.0.saturating_sub(earlier.0))
+        self.0.checked_duration_since(earlier.0).unwrap_or_else(|| Duration::from_secs(0))
     }
 
     /// Calculate the duration elapsed since the creation of this timestamp.
-    pub fn elapsed(&self, time: &dyn Time) -> Duration {
-        self.duration_since(time.now())
+    pub fn elapsed(&self) -> Duration {
+        self.0.elapsed()
+    }
+
+    /// Create a new `Timestamp` from the current `Instant`.
+    pub fn now() -> Self {
+        Timestamp(Instant::now())
+    }
+
+    /// Create a new `Timestamp` from the current `Instant` relative to a base `Instant`.
+    pub fn now_instant(base_instant: Instant) -> Self {
+        let now = Instant::now();
+        let duration = now.duration_since(base_instant);
+        Timestamp(base_instant + duration)
     }
 }
 
 impl Default for Timestamp {
     fn default() -> Self {
-        Self::EPOCH
+        Self::now()
     }
 }
 
 impl From<u64> for Timestamp {
     fn from(timestamp: u64) -> Self {
-        Timestamp(timestamp)
+        Timestamp(Instant::now() + Duration::from_micros(timestamp))
     }
 }
 
@@ -44,13 +51,7 @@ impl Add<Duration> for Timestamp {
     type Output = Timestamp;
 
     fn add(self, duration: Duration) -> Self::Output {
-        let us = u64::try_from(duration.as_micros()).expect("duration overflows u64");
-
-        Timestamp(
-            self.0
-                .checked_add(us)
-                .expect("overflow when adding duration from timestamp"),
-        )
+        Timestamp(self.0 + duration)
     }
 }
 
@@ -58,13 +59,7 @@ impl Sub<Duration> for Timestamp {
     type Output = Timestamp;
 
     fn sub(self, duration: Duration) -> Self::Output {
-        let us = u64::try_from(duration.as_micros()).expect("duration overflows u64");
-
-        Timestamp(
-            self.0
-                .checked_sub(us)
-                .expect("overflow when subtracting duration from timestamp"),
-        )
+        Timestamp(self.0 - duration)
     }
 }
 
@@ -101,7 +96,7 @@ where
     }
 }
 
-/// An implementation of [`Time`] based off of tokio.
+/// An implementation of `Time` based on `tokio::Instant`.
 #[derive(Debug, Clone, Copy)]
 pub struct TokioTime {
     base_instant: Instant,
@@ -109,10 +104,10 @@ pub struct TokioTime {
 }
 
 impl TokioTime {
-    /// Creates a new [`TokioTime`].
+    /// Creates a new `TokioTime`.
     pub fn new() -> Self {
         let base_instant = tokio::time::Instant::now();
-        let base_timestamp = Timestamp(0);
+        let base_timestamp = Timestamp::now(); // Use a default timestamp
 
         Self {
             base_instant,
@@ -129,12 +124,8 @@ impl Default for TokioTime {
 
 impl Time for TokioTime {
     fn now(&self) -> Timestamp {
-        let now = tokio::time::Instant::now();
-
-        let elapsed = now
-            .checked_duration_since(self.base_instant)
-            .expect("tokio::time::Instant went back in time");
-
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.base_instant);
         self.base_timestamp + elapsed
     }
 }
