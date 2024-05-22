@@ -142,6 +142,16 @@ impl TokioNetworkInner {
     ) -> anyhow::Result<NewConnection> {
         let mut timing = ConnectionTiming::new(start);
 
+        // Measure DNS resolution time
+        let dns_start = self.time.now();
+        let _ = tokio::net::lookup_host(&domain).await?;
+        let dns_end = self.time.now();
+        let dns_duration = dns_end.duration_since(dns_start);
+        info!("DNS lookup for {} took {:?}", domain, dns_duration);
+
+        // Update the connection timing with DNS duration
+        timing.set_dns_lookup(dns_duration);
+
         let tcp_stream = TcpStream::connect(remote_addr).await?;
         timing.set_connect(self.time.now());
 

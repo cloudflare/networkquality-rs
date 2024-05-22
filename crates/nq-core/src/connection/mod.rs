@@ -72,6 +72,9 @@ pub struct ConnectionTiming {
     time_secure: Duration,
     /// How long it took to setup the L7 protocol, H1/2/3.
     time_application: Duration,
+
+    // Duration of the DNS lookup
+    dns_time: Duration,
 }
 
 impl ConnectionTiming {
@@ -83,6 +86,7 @@ impl ConnectionTiming {
             time_connect: Duration::ZERO,
             time_secure: Duration::ZERO,
             time_application: Duration::ZERO,
+            dns_time: Duration::ZERO,
         }
     }
 
@@ -104,6 +108,11 @@ impl ConnectionTiming {
     /// Set the time it took to setup the L7 protocol, H1/2/3.
     pub fn set_application(&mut self, at: Timestamp) {
         self.time_application = at.duration_since(self.start);
+    }
+
+    /// Updates the duration it took to resolve the host to an IP address.
+    pub fn set_dns_lookup(&mut self, duration: Duration) {
+        self.dns_time = duration;
     }
 
     /// Returns when the connection started.
