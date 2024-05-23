@@ -33,17 +33,10 @@ impl Timestamp {
         let duration = now.duration_since(base_instant);
         Timestamp(base_instant + duration)
     }
-}
 
-impl Default for Timestamp {
-    fn default() -> Self {
-        Self::now()
-    }
-}
-
-impl From<u64> for Timestamp {
-    fn from(timestamp: u64) -> Self {
-        Timestamp(Instant::now() + Duration::from_micros(timestamp))
+    /// Create a new `Timestamp` from a relative duration in microseconds
+    pub fn from_duration_micros(micros: u64) -> Self {
+        Timestamp(Instant::now() + Duration::from_micros(micros))
     }
 }
 
@@ -70,8 +63,8 @@ pub trait Time: Send + Sync {
 }
 
 impl<T: Time> Time for Arc<T>
-where
-    T: Time,
+    where
+        T: Time,
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
@@ -79,8 +72,8 @@ where
 }
 
 impl<T: Time> Time for Box<T>
-where
-    T: Time,
+    where
+        T: Time,
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
@@ -88,8 +81,8 @@ where
 }
 
 impl<T: Time> Time for &T
-where
-    T: Time,
+    where
+        T: Time,
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
@@ -107,7 +100,7 @@ impl TokioTime {
     /// Creates a new `TokioTime`.
     pub fn new() -> Self {
         let base_instant = tokio::time::Instant::now();
-        let base_timestamp = Timestamp::now(); // Use a default timestamp
+        let base_timestamp = Timestamp::now(); // Use the current timestamp
 
         Self {
             base_instant,
