@@ -3,6 +3,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use bytes::BytesMut;
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use rand::{Rng, SeedableRng};
@@ -53,9 +54,12 @@ impl Body for UploadBody {
             0 => None,
             remaining if remaining > self.chunk.len() => {
                 self.remaining -= self.chunk.len();
-                let mut chunk = vec![0u8; self.chunk.len()];
+                // Use BytesMut for in-place modifications
+                let mut chunk = BytesMut::with_capacity(self.chunk.len());
+                chunk.resize(self.chunk.len(), 0);
                 self.rng.fill(&mut chunk[..]);
-                self.chunk = Bytes::from(chunk);
+                // Convert to Bytes
+                self.chunk = chunk.freeze();
                 Some(Ok(Frame::data(self.chunk.clone())))
             }
             remaining => {
