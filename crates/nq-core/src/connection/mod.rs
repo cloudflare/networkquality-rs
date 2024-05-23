@@ -110,11 +110,6 @@ impl ConnectionTiming {
         self.time_application = at.duration_since(self.start);
     }
 
-    /// Updates the duration it took to resolve the host to an IP address.
-    pub fn set_dns_lookup(&mut self, duration: Duration) {
-        self.dns_time = duration;
-    }
-
     /// Returns when the connection started.
     pub fn start(&self) -> Timestamp {
         self.start
@@ -128,6 +123,16 @@ impl ConnectionTiming {
     /// Returns how long it took for the transport to connect.
     pub fn time_connect(&self) -> Duration {
         self.time_connect
+    }
+
+    /// Set the duration of the DNS lookup
+    pub fn set_dns_lookup(&mut self, duration: Duration) {
+        self.dns_time = duration;
+    }
+
+    /// Returns the DNS lookup duration.
+    pub fn dns_time(&self) -> Duration {
+        self.dns_time
     }
 
     /// Returns how long it took for the security handshake to complete.

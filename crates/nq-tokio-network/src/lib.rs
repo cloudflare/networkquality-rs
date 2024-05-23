@@ -29,14 +29,21 @@ impl TokioNetwork {
 impl Network for TokioNetwork {
     fn resolve(&self, host: String) -> OneshotResult<Vec<SocketAddr>> {
         let (tx, rx) = oneshot_result();
+        let time = self.inner.time.clone();
 
         tokio::spawn(async move {
-            let result = tokio::net::lookup_host(host)
-                .await
-                .map(|iter| iter.collect())
-                .map_err(Into::into);
-
-            let _ = tx.send(result);
+            match timed_lookup_host(host, time).await {
+                Ok(addrs ) => {
+                    if tx.send(Ok(addrs)).is_err() {
+                        error!("Failed to send resolved addresses");
+                    }
+                }
+                Err(e) => {
+                    if tx.send(Err(e.into())).is_err() {
+                        error!("Failed to send error");
+                    }
+                }
+            }
         });
 
         rx
@@ -97,12 +104,13 @@ impl Network for TokioNetwork {
                 info!("sending response future");
                 let _ = tx.send(Ok(response));
             }
-            .in_current_span(),
+                .in_current_span(),
         );
 
         rx
     }
 }
+
 
 #[derive(Clone)]
 pub struct TokioNetworkInner {
@@ -141,16 +149,6 @@ impl TokioNetworkInner {
         conn_type: ConnectionType,
     ) -> anyhow::Result<NewConnection> {
         let mut timing = ConnectionTiming::new(start);
-
-        // Measure DNS resolution time
-        let dns_start = self.time.now();
-        let _ = tokio::net::lookup_host(&domain).await?;
-        let dns_end = self.time.now();
-        let dns_duration = dns_end.duration_since(dns_start);
-        info!("DNS lookup for {} took {:?}", domain, dns_duration);
-
-        // Update the connection timing with DNS duration
-        timing.set_dns_lookup(dns_duration);
 
         let tcp_stream = TcpStream::connect(remote_addr).await?;
         timing.set_connect(self.time.now());
@@ -196,4 +194,16 @@ impl Debug for TokioNetworkInner {
             .field("time", &"Arc<dyn Time>")
             .finish()
     }
+}
+
+async fn timed_lookup_host(host: String, time: Arc<dyn Time>) -> anyhow::Result<Vec<SocketAddr>> {
+    let dns_start = time.now();
+    let addrs = tokio::net::lookup_host(host).await?.collect();
+    let dns_end = time.now();
+    let dns_duration = dns_end.duration_since(dns_start);
+
+    let mut timing = ConnectionTiming::new(dns_start);
+    timing.set_dns_lookup(dns_duration);
+
+    Ok(addrs)
 }
