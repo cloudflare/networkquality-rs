@@ -36,7 +36,7 @@ pub struct Latency {
 impl Latency {
     pub fn new(config: LatencyConfig) -> Self {
         Self {
-            start: Timestamp::default(),
+            start: Timestamp::now(),
             config,
             probe_results: TimeSeries::new(),
         }

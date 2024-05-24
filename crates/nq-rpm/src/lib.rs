@@ -88,7 +88,7 @@ impl Responsiveness {
         let load_generator = LoadGenerator::new(config.load_config())?;
 
         Ok(Self {
-            start: Timestamp::default(),
+            start: Timestamp::now(),
             config,
             load_generator,
             foreign_probe_results: Default::default(),

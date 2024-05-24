@@ -72,6 +72,9 @@ pub struct ConnectionTiming {
     time_secure: Duration,
     /// How long it took to setup the L7 protocol, H1/2/3.
     time_application: Duration,
+
+    // Duration of the DNS lookup
+    dns_time: Duration,
 }
 
 impl ConnectionTiming {
@@ -83,6 +86,7 @@ impl ConnectionTiming {
             time_connect: Duration::ZERO,
             time_secure: Duration::ZERO,
             time_application: Duration::ZERO,
+            dns_time: Duration::ZERO,
         }
     }
 
@@ -119,6 +123,16 @@ impl ConnectionTiming {
     /// Returns how long it took for the transport to connect.
     pub fn time_connect(&self) -> Duration {
         self.time_connect
+    }
+
+    /// Set the duration of the DNS lookup
+    pub fn set_dns_lookup(&mut self, duration: Duration) {
+        self.dns_time = duration;
+    }
+
+    /// Returns the DNS lookup duration.
+    pub fn dns_time(&self) -> Duration {
+        self.dns_time
     }
 
     /// Returns how long it took for the security handshake to complete.
