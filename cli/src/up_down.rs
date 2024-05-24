@@ -48,7 +48,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let time_body = finished.duration_since(body_start);
     let time_total = timing.time_secure() + time_body;
 
-    println!(" time_lookup: {:.4}", timing.time_lookup().as_secs_f32());
+    println!(" dns_time: {:.4}", timing.dns_time().as_secs_f32());
     println!("time_connect: {:.4}", timing.time_connect().as_secs_f32());
     println!(" time_secure: {:.4}", timing.time_secure().as_secs_f32());
     println!(
@@ -111,7 +111,7 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let time_body = finished.duration_since(body_start);
     let time_total = timing.time_secure() + time_body;
 
-    println!(" time_lookup: {:.4}", timing.time_lookup().as_secs_f32());
+    println!(" dns_time: {:.4}", timing.dns_time().as_secs_f32());
     println!("time_connect: {:.4}", timing.time_connect().as_secs_f32());
     println!(" time_secure: {:.4}", timing.time_secure().as_secs_f32());
     println!(
