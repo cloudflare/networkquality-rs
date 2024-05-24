@@ -3,25 +3,35 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use bytes::BytesMut;
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
 use tracing::trace;
 
-/// A body that continually uploads a chunk of the same bytes until
+/// A body that continually uploads a chunk of random bytes until
 /// it has sent a given number of bytes.
 #[derive(Debug)]
 pub struct UploadBody {
     remaining: usize,
     chunk: Bytes,
+    rng: StdRng,
 }
 
 impl UploadBody {
     pub fn new(size: usize) -> Self {
-        const CHUNK_SIZE: usize = 256 * 1024; // 1MB
+        const CHUNK_SIZE: usize = 256 * 1024; // 256 KB
+
+        let mut rng = StdRng::from_entropy();
+        let chunk_size = std::cmp::min(CHUNK_SIZE, size);
+        let mut chunk = vec![0u8; chunk_size];
+        rng.fill(&mut chunk[..]);
 
         UploadBody {
             remaining: size,
-            chunk: vec![0x55; std::cmp::min(CHUNK_SIZE, size)].into(),
+            chunk: Bytes::from(chunk),
+            rng,
         }
     }
 }
@@ -35,7 +45,7 @@ impl Body for UploadBody {
         _cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         trace!(
-            "upload body poll_frame: remaing={}, chunk.len={}",
+            "upload body poll_frame: remaining={}, chunk.len={}",
             self.remaining,
             self.chunk.len()
         );
@@ -44,12 +54,16 @@ impl Body for UploadBody {
             0 => None,
             remaining if remaining > self.chunk.len() => {
                 self.remaining -= self.chunk.len();
-
+                // Use BytesMut for in-place modifications
+                let mut chunk = BytesMut::with_capacity(self.chunk.len());
+                chunk.resize(self.chunk.len(), 0);
+                self.rng.fill(&mut chunk[..]);
+                // Convert to Bytes
+                self.chunk = chunk.freeze();
                 Some(Ok(Frame::data(self.chunk.clone())))
             }
             remaining => {
                 self.remaining = 0;
-
                 Some(Ok(Frame::data(self.chunk.slice(..remaining))))
             }
         })
