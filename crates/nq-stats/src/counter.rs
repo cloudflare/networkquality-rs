@@ -28,7 +28,7 @@ impl CounterSeries {
                 self.samples.push(sample);
                 return;
             }
-        }
+      }
         let idx = self.timestamps.partition_point(|&p| p < timestamp);
 
         if idx == self.samples.len() {
