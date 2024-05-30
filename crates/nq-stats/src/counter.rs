@@ -28,8 +28,8 @@ impl CounterSeries {
                 self.samples.push(sample);
                 return;
             }
-        }
-        let idx = self.timestamps.partition_point(|p| p < &timestamp);
+      }
+        let idx = self.timestamps.partition_point(|&p| p < timestamp);
 
         if idx == self.samples.len() {
             self.timestamps.push(timestamp);
@@ -41,11 +41,19 @@ impl CounterSeries {
     }
 
     pub fn sample_interval(&self, from: Timestamp, to: Timestamp) -> Option<SampleRange> {
-        let start_idx = self.timestamps.partition_point(|t| t < &from);
-        let end_idx = self.timestamps.partition_point(|t| t < &to);
+        let start_idx = self.timestamps.partition_point(|&t| t < from);
+        let end_idx = self.timestamps.partition_point(|&t| t <= to);
 
-        // end is either somewhere in the range or the last idx:
-        let end = self.timestamps.len().saturating_sub(1).min(end_idx);
+        // Adjust start_idx to include the sample at the boundary of `from`.
+        // This ensures the interval calculation correctly reflects the moving average nature
+        // by capturing the cumulative metric up to the start of the interval.
+        // For example, to calculate the sum for the last 4 intervals
+        // the start sample should be at the index before the `from` timestamp.
+        let start_idx = if start_idx > 0 { start_idx - 1 } else { start_idx };
+
+        if start_idx >= end_idx || start_idx >= self.timestamps.len() {
+            return None;
+        }
 
         let start = self
             .timestamps
@@ -54,9 +62,9 @@ impl CounterSeries {
             .zip(self.samples.get(start_idx).copied())?;
         let end = self
             .timestamps
-            .get(end)
+            .get(end_idx.saturating_sub(1))
             .copied()
-            .zip(self.samples.get(end).copied())?;
+            .zip(self.samples.get(end_idx.saturating_sub(1)).copied())?;
 
         debug!("sample interval: from={from:?}, to={to:?}, start_idx={start_idx}, end_idx={end_idx}, start={start:?}, end={end:?}");
 
@@ -73,27 +81,30 @@ impl CounterSeries {
 
     pub fn interval_sum(&self, from: Timestamp, to: Timestamp) -> f64 {
         let Some(SampleRange {
-            start: (_start_ts, start_sample),
-            end: (_end_ts, end_sample),
-        }) = self.sample_interval(from, to)
-        else {
-            return 0.0;
-        };
+                     start: (_start_ts, start_sample),
+                     end: (_end_ts, end_sample),
+                 }) = self.sample_interval(from, to)
+            else {
+                return 0.0;
+            };
 
         end_sample - start_sample
     }
 
     pub fn interval_average(&self, from: Timestamp, to: Timestamp) -> Option<f64> {
         let SampleRange {
-            start: (start_ts, start_sample),
-            end: (end_ts, end_sample),
+            start: (start_ts, _),
+            end: (end_ts, _),
         } = self.sample_interval(from, to)?;
 
-        if start_ts == end_ts {
-            Some(end_sample)
-        } else {
-            Some((end_sample - start_sample) / end_ts.duration_since(start_ts).as_secs_f64())
+        let sum = self.interval_sum(from, to);
+        let duration = end_ts.duration_since(start_ts).as_secs_f64();
+
+        if duration == 0.0 {
+            return None;
         }
+
+        Some(sum / duration)
     }
 
     pub fn samples(&self) -> impl Iterator<Item = f64> + Clone + '_ {
@@ -118,7 +129,7 @@ mod tests {
         let mut ts = CounterSeries::new();
         assert_eq!(ts.average(), None);
 
-        let now = Timestamp::now_std();
+        let now = Timestamp::now();
 
         for n in 0..10 {
             ts.add(now + n * Duration::from_secs(1), n as f64);
@@ -130,13 +141,14 @@ mod tests {
     #[test]
     fn average_intervaled() {
         let mut ts = CounterSeries::new();
-        let start = Timestamp::now_std();
+        let start = Timestamp::now();
 
         let intervals = 4;
         let interval_length = Duration::from_secs(1);
 
+        // Ase cumulative samples
         for n in 0..=10 {
-            ts.add(start + interval_length * n as u32, n as f64);
+            ts.add(start + interval_length * n as u32, (n * (n + 1) / 2) as f64);
         }
 
         let total_avg = ts.average().unwrap();

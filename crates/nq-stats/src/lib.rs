@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(ts.average(), None);
 
         for n in 1..10 {
-            ts.add(Timestamp::now_std(), n as f64);
+            ts.add(Timestamp::now(), n as f64);
             assert_eq!(ts.average(), Some(avg_first_n(n as f64)));
         }
     }
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn average_intervaled() {
         let mut ts = TimeSeries::new();
-        let start = Timestamp::now_std();
+        let start = Timestamp::now();
 
         let intervals = 4;
         let interval_length = Duration::from_secs(1);
@@ -197,7 +197,7 @@ mod tests {
         let mut ts = TimeSeries::new();
 
         for n in 1..10 {
-            ts.add(Timestamp::now_std(), n as f64);
+            ts.add(Timestamp::now(), n as f64);
             assert_eq!(ts.std(), Some(std_first_n(n as f64)));
         }
     }
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn std_intervaled() {
         let mut ts = TimeSeries::new();
-        let start = Timestamp::now_std();
+        let start = Timestamp::now();
 
         let intervals = 4;
         let interval_length = Duration::from_secs(1);
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn trimmed_mean() {
         let mut ts = TimeSeries::new();
-        let start = Timestamp::now_std();
+        let start = Timestamp::now();
 
         let intervals = 10;
         let interval_length = Duration::from_secs(1);
