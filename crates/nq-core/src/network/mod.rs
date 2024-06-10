@@ -3,52 +3,57 @@ use std::sync::Arc;
 use http::Response;
 use hyper::body::Incoming;
 use tokio::sync::RwLock;
-use crate::{body::NqBody, Timestamp, ConnectionType, OneshotResult, EstablishedConnection};
+use async_trait::async_trait;
+use anyhow::Result;
+use crate::{body::NqBody, Timestamp, ConnectionType, EstablishedConnection};
 
 /// A network abstraction for resolving hosts, creating connections, and sending requests.
+#[async_trait]
 pub trait Network: Send + Sync + 'static {
     /// Resolves a host to a list of socket addresses.
-    fn resolve(&self, host: String) -> OneshotResult<Vec<SocketAddr>>;
+    async fn resolve(&self, host: String) -> Result<Vec<SocketAddr>>;
 
     /// Creates a new connection to the given domain.
-    fn new_connection(
+    async fn new_connection(
         &self,
         start: Timestamp,
         remote_addr: SocketAddr,
         domain: String,
         conn_type: ConnectionType,
-    ) -> OneshotResult<Arc<RwLock<EstablishedConnection>>>;
+    ) -> Result<Arc<RwLock<EstablishedConnection>>>;
 
     /// Sends a request over the specified connection.
-    fn send_request(
+    async fn send_request(
         &self,
         connection: Arc<RwLock<EstablishedConnection>>,
         request: http::Request<NqBody>,
-    ) -> OneshotResult<Response<Incoming>>;
+    ) -> Result<Response<Incoming>>;
 }
 
-
+#[async_trait]
 impl Network for Arc<dyn Network> {
-    fn resolve(&self, host: String) -> OneshotResult<Vec<SocketAddr>> {
-        self.as_ref().resolve(host)
+    async fn resolve(&self, host: String) -> Result<Vec<SocketAddr>> {
+        self.as_ref().resolve(host).await
     }
 
-    fn new_connection(
+    async fn new_connection(
         &self,
         start: Timestamp,
         remote_addr: SocketAddr,
         domain: String,
         conn_type: ConnectionType,
-    ) -> OneshotResult<Arc<RwLock<EstablishedConnection>>> {
+    ) -> Result<Arc<RwLock<EstablishedConnection>>> {
         self.as_ref()
             .new_connection(start, remote_addr, domain, conn_type)
+            .await
     }
 
-    fn send_request(
+    async fn send_request(
         &self,
         connection: Arc<RwLock<EstablishedConnection>>,
         request: http::Request<NqBody>,
-    ) -> OneshotResult<Response<Incoming>> {
+    ) -> Result<Response<Incoming>> {
         self.as_ref().send_request(connection, request)
+            .await
     }
 }
