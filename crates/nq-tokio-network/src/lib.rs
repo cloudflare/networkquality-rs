@@ -1,17 +1,19 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
-use anyhow::bail;
 use http::{Request, Response};
 use hyper::body::Incoming;
 use nq_core::{
-    oneshot_result, ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType, Network,
-    NewConnection, NqBody, OneshotResult, ResponseFuture, Time, Timestamp,
+    oneshot_result, ConnectionManager, ConnectionTiming, ConnectionType, Network,
+    NqBody, OneshotResult, ResponseFuture, Time, Timestamp, EstablishedConnection
 };
+
 use shellflip::{ShutdownHandle, ShutdownSignal};
 use tokio::net::TcpStream;
 use tracing::{error, info, Instrument};
+
 
 #[derive(Debug, Clone)]
 pub struct TokioNetwork {
@@ -55,7 +57,7 @@ impl Network for TokioNetwork {
         remote_addr: SocketAddr,
         domain: String,
         conn_type: ConnectionType,
-    ) -> OneshotResult<NewConnection> {
+    ) -> OneshotResult<Arc<RwLock<EstablishedConnection>>> {
         let (tx, rx) = oneshot_result();
 
         let inner = self.inner.clone();
@@ -75,7 +77,7 @@ impl Network for TokioNetwork {
     #[tracing::instrument(skip(self, request), fields(uri=%request.uri()))]
     fn send_request(
         &self,
-        conn_id: ConnectionId,
+        connection: Arc<RwLock<EstablishedConnection>>,
         request: Request<NqBody>,
     ) -> OneshotResult<Response<Incoming>> {
         let (tx, rx) = oneshot_result();
@@ -85,7 +87,7 @@ impl Network for TokioNetwork {
             async move {
                 info!("sending request");
 
-                let response_result = match inner.send_request(conn_id, request).await {
+                let response_result = match inner.send_request(connection, request).await {
                     Ok(fut) => fut.await,
                     Err(error) => {
                         let _ = tx.send(Err(error));
@@ -114,14 +116,14 @@ impl Network for TokioNetwork {
 
 #[derive(Clone)]
 pub struct TokioNetworkInner {
-    connections: Arc<ConnectionMap>,
+    connections: Arc<ConnectionManager>,
     time: Arc<dyn Time>,
     shutdown: Arc<ShutdownHandle>,
 }
 
 impl TokioNetworkInner {
     pub fn new(time: Arc<dyn Time>, shutdown: Arc<ShutdownHandle>) -> Self {
-        let connections: Arc<ConnectionMap> = Default::default();
+        let connections: Arc<ConnectionManager> = Default::default();
 
         tokio::spawn({
             let connections = Arc::clone(&connections);
@@ -147,7 +149,7 @@ impl TokioNetworkInner {
         remote_addr: SocketAddr,
         domain: String,
         conn_type: ConnectionType,
-    ) -> anyhow::Result<NewConnection> {
+    ) -> anyhow::Result<Arc<RwLock<EstablishedConnection>>> {
         let mut timing = ConnectionTiming::new(start);
 
         let tcp_stream = TcpStream::connect(remote_addr).await?;
@@ -174,14 +176,15 @@ impl TokioNetworkInner {
     #[tracing::instrument(skip(self, request), fields(uri=%request.uri()))]
     async fn send_request(
         &self,
-        conn_id: ConnectionId,
+        connection: Arc<RwLock<EstablishedConnection>>,
         request: http::Request<NqBody>,
     ) -> anyhow::Result<ResponseFuture> {
         info!("sending request");
 
-        let Some(response_fut) = self.connections.send_request(conn_id, request).await else {
-            bail!("ConnectionId={conn_id:?} does not exist");
-        };
+        let mut conn = connection.write().await;
+        let response_fut = conn
+            .send_request(request)
+            .ok_or_else(|| anyhow::anyhow!("Failed to send request"))?;
 
         Ok(response_fut)
     }

@@ -13,9 +13,8 @@ use tokio::select;
 use tracing::{debug, error, info, Instrument};
 
 use crate::body::NqBody;
-use crate::network::ConnectionTiming;
 use crate::util::ByteStream;
-use crate::{ConnectionType, ResponseFuture, Time};
+use crate::{ConnectionTiming, ConnectionType, ResponseFuture, Time};
 
 pub type TlsStream = tokio_boring::SslStream<Box<dyn ByteStream>>;
 
@@ -27,7 +26,9 @@ pub struct EstablishedConnection {
     send_request: Option<SendRequest>,
 }
 
+/// Represents an established connection with timing information and a send request handler.
 impl EstablishedConnection {
+    /// Creates a new `EstablishedConnection`.
     pub fn new(timing: ConnectionTiming, send_request: SendRequest) -> Self {
         Self {
             timing,
@@ -35,14 +36,17 @@ impl EstablishedConnection {
         }
     }
 
+    /// Sends a request using the connection.
     pub fn send_request(&mut self, req: Request<NqBody>) -> Option<ResponseFuture> {
         self.send_request.as_mut().map(|s| s.send_request(req))
     }
 
+    /// Returns the timing information of the connection.
     pub fn timing(&self) -> ConnectionTiming {
         self.timing
     }
 
+    /// Drops the send request handler.
     pub fn drop_send_request(&mut self) {
         self.send_request = None;
     }

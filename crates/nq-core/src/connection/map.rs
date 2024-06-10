@@ -1,10 +1,9 @@
-// todo(fisher): cleanup constructor arguments
-#![allow(clippy::too_many_arguments)]
-
-use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
+use anyhow::Result;
 use http::Request;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
@@ -12,21 +11,17 @@ use shellflip::ShutdownSignal;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::connection::http::{start_h1_conn, start_h2_conn, tls_connection};
-use crate::connection::NewConnection;
-use crate::network::ConnectionTiming;
+use crate::connection::http::{start_h1_conn, start_h2_conn, tls_connection, EstablishedConnection};
 use crate::util::ByteStream;
-use crate::{ConnectionId, ConnectionType, ResponseFuture, Time};
+use crate::{ConnectionTiming, ConnectionType, ResponseFuture, Time};
 
-use super::http::EstablishedConnection;
-
-/// Creates and holds [`EstablishedConnection`]s in a map.
+/// Creates and holds [`EstablishedConnection`]s in a VecDeque.
 #[derive(Default, Debug)]
-pub struct ConnectionMap {
-    map: RwLock<HashMap<ConnectionId, EstablishedConnection>>,
+pub struct ConnectionManager {
+    connections: RwLock<VecDeque<Arc<RwLock<EstablishedConnection>>>>,
 }
 
-impl ConnectionMap {
+impl ConnectionManager {
     /// Creates a new connection on the given io.
     pub async fn new_connection(
         &self,
@@ -37,66 +32,50 @@ impl ConnectionMap {
         io: Box<dyn ByteStream>,
         time: &dyn Time,
         shutdown_signal: ShutdownSignal,
-    ) -> anyhow::Result<NewConnection> {
-        match conn_type {
-            crate::ConnectionType::H1 => {
+    ) -> Result<Arc<RwLock<EstablishedConnection>>> {
+        let connection = match conn_type {
+            ConnectionType::H1 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-
-                let connection =
-                    start_h1_conn(domain, timing, stream, time, shutdown_signal).await?;
-                let timing = connection.timing();
-
-                let id = ConnectionId::new();
-                self.map.write().await.insert(id, connection);
-
-                Ok(NewConnection { id, timing })
+                start_h1_conn(domain, timing, stream, time, shutdown_signal).await?
             }
-            crate::ConnectionType::H2 => {
+            ConnectionType::H2 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-
-                let connection =
-                    start_h2_conn(remote_addr, domain, timing, stream, time, shutdown_signal)
-                        .await?;
-                let timing = connection.timing();
-
-                let id = ConnectionId::new();
-                self.map.write().await.insert(id, connection);
-
-                Ok(NewConnection { id, timing })
+                start_h2_conn(remote_addr, domain, timing, stream, time, shutdown_signal).await?
             }
-            crate::ConnectionType::H3 => todo!(),
-        }
+            ConnectionType::H3 => todo!(),
+        };
+
+        let connection = Arc::new(RwLock::new(connection));
+        self.connections.write().await.push_back(connection.clone());
+        Ok(connection)
     }
 
     /// Sends a request on the given connection.
     pub async fn send_request(
         &self,
-        conn_id: ConnectionId,
+        connection: Arc<RwLock<EstablishedConnection>>,
         request: Request<BoxBody<Bytes, Infallible>>,
     ) -> Option<ResponseFuture> {
-        let mut connections = self.map.write().await;
-
-        info!("sending request on conn_id={conn_id:?}");
-
-        connections
-            .get_mut(&conn_id)
-            .and_then(|conn| conn.send_request(request))
+        info!("Sending request on the specified connection");
+        let mut conn = connection.write().await;
+        conn.send_request(request)
     }
 
-    /// The number of [`EstablishedConnection`]s being held in the map.
+    /// The number of [`EstablishedConnection`]s being held in the manager.
     pub async fn len(&self) -> usize {
-        self.map.read().await.len()
+        self.connections.read().await.len()
     }
 
-    /// Returns if the [`ConnectionMap`] is empty.
+    /// Returns if the [`ConnectionManager`] is empty.
     pub async fn is_empty(&self) -> bool {
-        self.map.read().await.is_empty()
+        self.connections.read().await.is_empty()
     }
 
     /// Drop all `SendRequest` structs, effectively cancelling all connections.
     pub async fn shutdown(&self) {
-        for (_, connection) in self.map.write().await.iter_mut() {
-            connection.drop_send_request();
+        for connection in self.connections.write().await.iter_mut() {
+            let mut conn = connection.write().await;
+            conn.drop_send_request();
         }
     }
 }

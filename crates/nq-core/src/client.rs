@@ -4,6 +4,7 @@
 //! throughput of a flow.
 
 use std::{convert::Infallible, net::ToSocketAddrs, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 
 use anyhow::Context;
 use http::{HeaderMap, HeaderValue, Uri};
@@ -14,10 +15,9 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, Instrument};
 
-use crate::{
-    body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
-    oneshot_result, ConnectionId, ConnectionType, Network, OneshotResult, Time, Timestamp,
-};
+use crate::{body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody}, oneshot_result,
+            ConnectionType, Network, OneshotResult, Time, Timestamp, EstablishedConnection};
+
 
 /// The default user agent for networkquality requests
 pub const MACH_USER_AGENT: &str = "mach/0.1.0";
@@ -41,7 +41,7 @@ pub enum Direction {
 /// The returned [`InflightBody`] can be used to track the progress of an upload
 /// or download and when it finishes.
 pub struct ThroughputClient {
-    conn_id: Option<ConnectionId>,
+    connection: Option<Arc<RwLock<EstablishedConnection>>>,
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
     direction: Direction,
@@ -51,7 +51,7 @@ impl ThroughputClient {
     /// Create an download oriented [`ThroughputClient`].
     pub fn download() -> Self {
         Self {
-            conn_id: None,
+            connection: None,
             new_connection_type: None,
             headers: None,
             direction: Direction::Down,
@@ -61,16 +61,16 @@ impl ThroughputClient {
     /// Create an upload oriented [`ThroughputClient`].
     pub fn upload(size: usize) -> Self {
         Self {
-            conn_id: None,
+            connection: None,
             new_connection_type: None,
             headers: None,
             direction: Direction::Up(size),
         }
     }
 
-    /// Send requests on the given [`ConnectionId`].
-    pub fn with_connection(mut self, conn_id: ConnectionId) -> Self {
-        self.conn_id = Some(conn_id);
+    /// Send requests on the given [`EstablishedConnection`].
+    pub fn with_connection(mut self, connection: Arc<RwLock<EstablishedConnection>>) -> Self {
+        self.connection = Some(connection);
         self
     }
 
@@ -145,10 +145,8 @@ impl ThroughputClient {
             async move {
                 let start = time.now();
 
-                let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
-                    tracing::debug!("using conn_id={conn_id:?}");
-
-                    (conn_id, None)
+                let connection = if let Some(connection) = self.connection {
+                    connection
                 } else if let Some(conn_type) = self.new_connection_type {
                     info!("creating new connection to {host_with_port}");
 
@@ -159,30 +157,31 @@ impl ThroughputClient {
 
                     debug!("addrs: {addrs:?}");
 
-                    let time_lookup = time.now();
-
-                    let mut connection = network
+                    let connection = network
                         .new_connection(start, addrs[0], host, conn_type)
                         .await
                         .context("creating new connection")?;
 
-                    connection.timing.set_lookup(time_lookup);
-
-                    (connection.id, Some(connection.timing))
+                    connection
                 } else {
                     todo!()
                 };
 
-                debug!(?conn_id, "connection used");
-                let response_fut = network.send_request(conn_id, request);
+                let conn_timing = {
+                    let conn = connection.read().await;
+                    conn.timing().clone()
+                };
+
+                debug!("connection used");
+                let response_fut = network.send_request(connection.clone(), request);
 
                 let mut response_body = match self.direction {
                     Direction::Up(_) => {
                         debug!("sending upload events");
                         if tx
                             .send(Ok(InflightBody {
-                                conn_id,
-                                timing,
+                                connection: connection.clone(),
+                                timing: Some(conn_timing),
                                 events: events.expect("events were set above"),
                                 start,
                                 headers,
@@ -209,8 +208,8 @@ impl ThroughputClient {
                         debug!("sending download events");
                         if tx
                             .send(Ok(InflightBody {
-                                conn_id,
-                                timing,
+                                connection: connection.clone(),
+                                timing: Some(conn_timing),
                                 start,
                                 events,
                                 headers: parts.headers,
@@ -226,8 +225,7 @@ impl ThroughputClient {
 
                 tokio::spawn(
                     async move {
-                        // Consume the response body and keep the connection
-                        // alive. Stop if we hit an error.
+                        // Consume the response body and keep the connection alive. Stop if we hit an error.
                         info!("waiting for response body");
 
                         loop {
@@ -240,12 +238,12 @@ impl ThroughputClient {
                             }
                         }
                     }
-                    .in_current_span(),
+                        .in_current_span(),
                 );
 
                 Ok::<_, anyhow::Error>(())
             }
-            .in_current_span(),
+                .in_current_span(),
         );
 
         Ok(rx)
@@ -258,16 +256,16 @@ impl ThroughputClient {
 /// if it exits.
 #[derive(Default)]
 pub struct Client {
-    conn_id: Option<ConnectionId>,
+    connection: Option<Arc<RwLock<EstablishedConnection>>>,
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
     method: Option<String>,
 }
 
 impl Client {
-    /// Send requests on the given [`ConnectionId`].
-    pub fn with_connection(mut self, conn_id: ConnectionId) -> Self {
-        self.conn_id = Some(conn_id);
+    /// Send requests on the given [`EstablishedConnection`].
+    pub fn with_connection(mut self, connection: Arc<RwLock<EstablishedConnection>>) -> Self {
+        self.connection = Some(connection);
         self
     }
 
@@ -331,26 +329,32 @@ impl Client {
             async move {
                 let start = time.now();
 
-                let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
-                    (conn_id, None)
+                let connection = if let Some(connection) = self.connection {
+                    connection
                 } else if let Some(conn_type) = self.new_connection_type {
                     info!("creating new connection");
                     let connection = network
                         .new_connection(start, remote_addr, host, conn_type)
                         .await?;
 
-                    (connection.id, Some(connection.timing))
+
+                    connection
+                    // (connection.id, Some(connection.timing))
                 } else {
                     todo!()
                 };
 
-                debug!(?conn_id, "connection used");
                 // todo(fisher): fine-grained send timings for requests
-                let mut response = network.send_request(conn_id, request).await?;
+                let mut response = network.send_request(connection.clone(), request).await?;
 
-                if let Some(timing) = timing {
-                    response.extensions_mut().insert(timing);
-                }
+                let timing = {
+                    let conn = connection.read().await;
+                    conn.timing().clone()
+                };
+
+                debug!(?connection, "connection used");
+
+                response.extensions_mut().insert(timing);
 
                 if tx.send(Ok(response)).is_err() {
                     error!("unable to send response");

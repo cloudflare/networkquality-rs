@@ -503,11 +503,11 @@ impl Responsiveness {
     ) -> anyhow::Result<bool> {
         // The test client should uniformly and randomly select from the active
         // load-generating connections on which to send self probes.
-        let Some(conn_id) = self.load_generator.random_connection() else {
+        let Some(connection) = self.load_generator.random_connection() else {
             return Ok(false);
         };
 
-        let inflight_body_fut = ThroughputClient::download().with_connection(conn_id).send(
+        let inflight_body_fut = ThroughputClient::download().with_connection(connection).send(
             self.config.small_download_url.as_str().parse()?,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
