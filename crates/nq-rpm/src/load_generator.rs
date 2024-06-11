@@ -7,7 +7,6 @@ use nq_core::{BodyEvent, ConnectionType, Network,
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
-use shellflip::ShutdownSignal;
 use tokio::sync::mpsc::{UnboundedReceiver};
 use tokio::sync::RwLock;
 
@@ -43,14 +42,13 @@ impl LoadGenerator {
         })
     }
 
-    #[tracing::instrument(skip(self, network, time, shutdown))]
+    #[tracing::instrument(skip(self, network, time))]
     pub async fn new_loaded_connection(
         &self,
         direction: Direction,
         conn_type: ConnectionType,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        shutdown: ShutdownSignal,
     ) -> anyhow::Result<LoadedConnection> {
         let client = match direction {
             Direction::Down => ThroughputClient::download(),
@@ -67,7 +65,6 @@ impl LoadGenerator {
                 },
                 network,
                 time,
-                shutdown,
             ).await?;
 
         tracing::debug!("got loaded connection response future");

@@ -8,8 +8,7 @@ use http::{Request, Response};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
-use shellflip::ShutdownSignal;
-use tokio::select;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, Instrument};
 
 use crate::body::NqBody;
@@ -24,15 +23,17 @@ pub type TlsStream = tokio_boring::SslStream<Box<dyn ByteStream>>;
 pub struct EstablishedConnection {
     timing: ConnectionTiming,
     send_request: Option<SendRequest>,
+    handle: JoinHandle<()>,
 }
 
 /// Represents an established connection with timing information and a send request handler.
 impl EstablishedConnection {
     /// Creates a new `EstablishedConnection`.
-    pub fn new(timing: ConnectionTiming, send_request: SendRequest) -> Self {
+    pub fn new(timing: ConnectionTiming, send_request: SendRequest, handle: JoinHandle<()>) -> Self {
         Self {
             timing,
             send_request: Some(send_request),
+            handle,
         }
     }
 
@@ -49,6 +50,12 @@ impl EstablishedConnection {
     /// Drops the send request handler.
     pub fn drop_send_request(&mut self) {
         self.send_request = None;
+    }
+}
+
+impl Drop for EstablishedConnection {
+    fn drop(&mut self) {
+        self.handle.abort();
     }
 }
 
@@ -85,31 +92,23 @@ pub async fn tls_connection(
     Ok(ssl_stream)
 }
 
-#[tracing::instrument(skip(io, time, shutdown_signal))]
+#[tracing::instrument(skip(io, time))]
 pub async fn start_h1_conn(
     domain: String,
     mut timing: ConnectionTiming,
     io: impl ByteStream,
     time: &dyn Time,
-    mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<EstablishedConnection> {
     let (send_request, connection) = http1::handshake(TokioIo::new(io)).await?;
     timing.set_application(time.now());
 
-    tokio::spawn(
+    let handle = tokio::spawn(
         async move {
-            select! {
-                Err(e) = connection => {
-                    error!(error=%e, "error running h1 connection");
-                }
-                _ = shutdown_signal.on_shutdown() => {
-                    debug!("shutting down h1 connection");
-                }
+            if let Err(e) = connection.await {
+                error!(error=%e, "error running h1 connection");
             }
-
             info!("connection finished");
-        }
-        .in_current_span(),
+        }.in_current_span(),
     );
 
     let established_connection = EstablishedConnection::new(
@@ -117,43 +116,38 @@ pub async fn start_h1_conn(
         SendRequest::H1 {
             dispatch: send_request,
         },
+        handle,
     );
 
     Ok(established_connection)
 }
 
-#[tracing::instrument(skip(timing, io, time, shutdown_signal))]
+#[tracing::instrument(skip(timing, io, time))]
 pub async fn start_h2_conn(
     addr: SocketAddr,
     domain: String,
     mut timing: ConnectionTiming,
     io: impl ByteStream,
     time: &dyn Time,
-    mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<EstablishedConnection> {
     let (dispatch, connection) = http2::handshake(TokioExecutor, TokioIo::new(io)).await?;
     timing.set_application(time.now());
 
     debug!("finished h2 handshake");
 
-    tokio::spawn(
+    let handle = tokio::spawn(
         async move {
-            select! {
-                Err(e) = connection => {
-                    error!(error=%e, "error running h2 connection");
-                }
-                _ = shutdown_signal.on_shutdown() => {
-                    debug!("shutting down h2 connection");
-                }
+            if let Err(e) = connection.await {
+                error!(error=%e, "error running h2 connection");
             }
-
             info!("connection finished");
-        }
-        .in_current_span(),
+        }.in_current_span(),
     );
 
     info!(?timing, "established connection");
-    let established_connection = EstablishedConnection::new(timing, SendRequest::H2 { dispatch });
+    let established_connection = EstablishedConnection::new(timing,
+                                                            SendRequest::H2 { dispatch },
+                                                            handle);
 
     Ok(established_connection)
 }

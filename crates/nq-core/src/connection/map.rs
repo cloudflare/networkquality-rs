@@ -7,7 +7,6 @@ use anyhow::Result;
 use http::Request;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
-use shellflip::ShutdownSignal;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -31,16 +30,15 @@ impl ConnectionManager {
         conn_type: ConnectionType,
         io: Box<dyn ByteStream>,
         time: &dyn Time,
-        shutdown_signal: ShutdownSignal,
     ) -> Result<Arc<RwLock<EstablishedConnection>>> {
         let connection = match conn_type {
             ConnectionType::H1 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-                start_h1_conn(domain, timing, stream, time, shutdown_signal).await?
+                start_h1_conn(domain, timing, stream, time).await?
             }
             ConnectionType::H2 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-                start_h2_conn(remote_addr, domain, timing, stream, time, shutdown_signal).await?
+                start_h2_conn(remote_addr, domain, timing, stream, time).await?
             }
             ConnectionType::H3 => todo!(),
         };
@@ -69,13 +67,5 @@ impl ConnectionManager {
     /// Returns if the [`ConnectionManager`] is empty.
     pub async fn is_empty(&self) -> bool {
         self.connections.read().await.is_empty()
-    }
-
-    /// Drop all `SendRequest` structs, effectively cancelling all connections.
-    pub async fn shutdown(&self) {
-        for connection in self.connections.write().await.iter_mut() {
-            let mut conn = connection.write().await;
-            conn.drop_send_request();
-        }
     }
 }

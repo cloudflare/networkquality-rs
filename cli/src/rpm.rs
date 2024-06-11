@@ -7,7 +7,6 @@ use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
-use shellflip::{ShutdownCoordinator, ShutdownSignal};
 use tokio::time::{timeout};
 use tracing::{debug, error, info};
 
@@ -110,18 +109,15 @@ async fn run_test(
     config: &ResponsivenessConfig,
     download: bool,
 ) -> anyhow::Result<ResponsivenessResult> {
-    let shutdown_coordinator = ShutdownCoordinator::default();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
-        shutdown_coordinator.handle(),
     )) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
-    let result = rpm.run_test(network, time, ShutdownSignal::from(&*shutdown_coordinator.handle())).await?;
+    let result = rpm.run_test(network, time).await?;
 
     debug!("shutting down rpm test");
-    shutdown_coordinator.shutdown_with_timeout(1).await;
 
     Ok(result)
 }

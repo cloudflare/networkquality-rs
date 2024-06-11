@@ -10,8 +10,6 @@ use anyhow::Context;
 use http::{HeaderMap, HeaderValue, Uri};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Incoming};
-use shellflip::ShutdownSignal;
-use tokio::select;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, Instrument};
 
@@ -87,13 +85,12 @@ impl ThroughputClient {
     }
 
     /// Execute a download or upload request against the given [`Uri`].
-    #[tracing::instrument(skip(self, network, time, shutdown))]
+    #[tracing::instrument(skip(self, network, time))]
     pub async fn send(
         self,
         uri: Uri,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        mut shutdown: ShutdownSignal,
     ) -> anyhow::Result<InflightBody> {
         let mut headers = self.headers.unwrap_or_default();
 
@@ -203,12 +200,13 @@ impl ThroughputClient {
                         let mut counting_body = counting_body;
 
                         loop {
-                            select! {
-                                Some(res) = counting_body.frame() => if let Err(e) = res {
+                            if let Some(res) = counting_body.frame().await {
+                                if let Err(e) = res {
                                     error!("body closing: {e}");
                                     break;
-                                },
-                                _ = shutdown.on_shutdown() => break,
+                                }
+                            } else {
+                                break;
                             }
                         }
                     }.in_current_span(),
