@@ -88,13 +88,13 @@ impl ThroughputClient {
 
     /// Execute a download or upload request against the given [`Uri`].
     #[tracing::instrument(skip(self, network, time, shutdown))]
-    pub fn send(
+    pub async fn send(
         self,
         uri: Uri,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
         mut shutdown: ShutdownSignal,
-    ) -> anyhow::Result<OneshotResult<InflightBody>> {
+    ) -> anyhow::Result<InflightBody> {
         let mut headers = self.headers.unwrap_or_default();
 
         if !headers.contains_key("User-Agent") {
@@ -109,7 +109,6 @@ impl ThroughputClient {
             Direction::Up(_) => "POST",
         };
 
-        let (tx, rx) = oneshot_result();
         let mut events = None;
 
         let body: NqBody = match self.direction {
@@ -141,112 +140,91 @@ impl ThroughputClient {
 
         *request.headers_mut() = headers.clone();
 
-        tokio::spawn(
-            async move {
-                let start = time.now();
+        let start = time.now();
 
-                let connection = if let Some(connection) = self.connection {
-                    connection
-                } else if let Some(conn_type) = self.new_connection_type {
-                    info!("creating new connection to {host_with_port}");
+        let connection = if let Some(connection) = self.connection {
+            connection
+        } else if let Some(conn_type) = self.new_connection_type {
+            info!("creating new connection to {host_with_port}");
 
-                    let addrs = network
-                        .resolve(host_with_port)
-                        .await
-                        .context("unable to resolve host")?;
+            let addrs = network
+                .resolve(host_with_port)
+                .await
+                .context("unable to resolve host")?;
 
-                    debug!("addrs: {addrs:?}");
+            debug!("addrs: {addrs:?}");
 
-                    let connection = network
-                        .new_connection(start, addrs[0], host, conn_type)
-                        .await
-                        .context("creating new connection")?;
+            let connection = network
+                .new_connection(start, addrs[0], host, conn_type)
+                .await
+                .context("creating new connection")?;
 
-                    connection
-                } else {
-                    todo!()
-                };
+            connection
+        } else {
+            todo!()
+        };
 
-                let conn_timing = {
-                    let conn = connection.read().await;
-                    conn.timing().clone()
-                };
+        let conn_timing = {
+            let conn = connection.read().await;
+            conn.timing().clone()
+        };
 
-                debug!("connection used");
-                let response_fut = network.send_request(connection.clone(), request);
+        debug!("connection used");
+        let response_fut = network.send_request(connection.clone(), request).await?;
 
-                let mut response_body = match self.direction {
-                    Direction::Up(_) => {
-                        debug!("sending upload events");
-                        if tx
-                            .send(Ok(InflightBody {
-                                connection: connection.clone(),
-                                timing: Some(conn_timing),
-                                events: events.expect("events were set above"),
-                                start,
-                                headers,
-                            }))
-                            .is_err()
-                        {
-                            error!("error sending upload events");
-                        }
+        let response_body = match self.direction {
+            Direction::Up(_) => {
+                debug!("sending upload events");
 
-                        let (parts, incoming) = response_fut.await?.into_parts();
-                        info!("upload response parts: {:?}", parts);
+                InflightBody {
+                    connection: connection.clone(),
+                    timing: Some(conn_timing),
+                    events: events.expect("events were set above"),
+                    start,
+                    headers,
+                }
+            }
+            Direction::Down => {
+                let (parts, incoming) = response_fut.into_parts();
 
-                        incoming.boxed()
-                    }
-                    Direction::Down => {
-                        let (parts, incoming) = response_fut.await?.into_parts();
+                let (counting_body, events) = CountingBody::new(
+                    incoming,
+                    Duration::from_millis(100),
+                    Arc::clone(&time),
+                );
 
-                        let (counting_body, events) = CountingBody::new(
-                            incoming,
-                            Duration::from_millis(100),
-                            Arc::clone(&time),
-                        );
-
-                        debug!("sending download events");
-                        if tx
-                            .send(Ok(InflightBody {
-                                connection: connection.clone(),
-                                timing: Some(conn_timing),
-                                start,
-                                events,
-                                headers: parts.headers,
-                            }))
-                            .is_err()
-                        {
-                            error!("error sending download events");
-                        }
-
-                        counting_body.boxed()
-                    }
-                };
+                debug!("sending download events");
 
                 tokio::spawn(
                     async move {
                         // Consume the response body and keep the connection alive. Stop if we hit an error.
                         info!("waiting for response body");
 
+                        let mut counting_body = counting_body;
+
                         loop {
                             select! {
-                                Some(res) = response_body.frame() => if let Err(e) = res {
+                                Some(res) = counting_body.frame() => if let Err(e) = res {
                                     error!("body closing: {e}");
                                     break;
                                 },
                                 _ = shutdown.on_shutdown() => break,
                             }
                         }
-                    }
-                        .in_current_span(),
+                    }.in_current_span(),
                 );
 
-                Ok::<_, anyhow::Error>(())
+                InflightBody {
+                    connection: connection.clone(),
+                    timing: Some(conn_timing),
+                    start,
+                    events,
+                    headers: parts.headers,
+                }
             }
-                .in_current_span(),
-        );
+        };
 
-        Ok(rx)
+        Ok(response_body)
     }
 }
 
@@ -297,8 +275,8 @@ impl Client {
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
     ) -> anyhow::Result<OneshotResult<http::Response<Incoming>>>
-    where
-        B: Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static,
+        where
+            B: Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static,
     {
         let mut headers = self.headers.unwrap_or_default();
 
@@ -362,7 +340,7 @@ impl Client {
 
                 Ok::<_, anyhow::Error>(())
             }
-            .in_current_span(),
+                .in_current_span(),
         );
 
         Ok(rx)

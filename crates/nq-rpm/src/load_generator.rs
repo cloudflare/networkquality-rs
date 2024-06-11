@@ -46,7 +46,7 @@ impl LoadGenerator {
     }
 
     #[tracing::instrument(skip(self, network, time, shutdown))]
-    pub fn new_loaded_connection(
+    pub async fn new_loaded_connection(
         &self,
         direction: Direction,
         conn_type: ConnectionType,
@@ -72,15 +72,13 @@ impl LoadGenerator {
                 network,
                 time,
                 shutdown,
-            )?;
+            ).await?;
 
         tracing::debug!("got loaded connection response future");
 
         tokio::spawn(
             async move {
-                let inflight_body = response_fut
-                    .await
-                    .context("could not await response for loaded connection")?;
+                let inflight_body = response_fut;
 
                 tracing::debug!("sending loaded connection");
 

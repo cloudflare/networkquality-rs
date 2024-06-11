@@ -34,7 +34,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
             Arc::clone(&network),
             Arc::clone(&time),
             ShutdownSignal::from(&*shutdown_coordinator.handle()),
-        )?
+        )
         .await?;
 
     let timing = inflight_body
@@ -97,7 +97,7 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
             Arc::clone(&network),
             Arc::clone(&time),
             ShutdownSignal::from(&*shutdown_coordinator.handle()),
-        )?
+        )
         .await?;
 
     let timing = inflight_body
