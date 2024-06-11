@@ -1,9 +1,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
-use nq_core::{oneshot_result, BodyEvent, ConnectionType, Network, OneshotResult,
+use nq_core::{BodyEvent, ConnectionType, Network,
               Time, Timestamp, EstablishedConnection};
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
@@ -11,7 +10,6 @@ use serde::Deserialize;
 use shellflip::ShutdownSignal;
 use tokio::sync::mpsc::{UnboundedReceiver};
 use tokio::sync::RwLock;
-use tracing::Instrument;
 
 #[derive(Debug, Deserialize)]
 pub struct LoadConfig {

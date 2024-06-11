@@ -20,7 +20,7 @@ pub use crate::{
     network::Network,
     time::{Time, Timestamp, TokioTime},
     upgraded::ConnectUpgraded,
-    util::{oneshot_result, OneshotResult, ResponseFuture},
+    util::{ResponseFuture},
 };
 
 pub use anyhow::Error;

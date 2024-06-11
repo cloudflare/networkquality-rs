@@ -15,8 +15,8 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, Instrument};
 
-use crate::{body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody}, oneshot_result,
-            ConnectionType, Network, OneshotResult, Time, Timestamp, EstablishedConnection};
+use crate::{body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
+            ConnectionType, Network, Time, Timestamp, EstablishedConnection};
 
 
 /// The default user agent for networkquality requests
@@ -268,13 +268,13 @@ impl Client {
     /// Send a request to the given uri with the given body, timing how long it
     /// took.
     #[tracing::instrument(skip(self, body, network, time))]
-    pub fn send<B>(
+    pub async fn send<B>(
         self,
         uri: Uri,
         body: B,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-    ) -> anyhow::Result<OneshotResult<http::Response<Incoming>>>
+    ) -> anyhow::Result<http::Response<Incoming>>
         where
             B: Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static,
     {
@@ -302,48 +302,34 @@ impl Client {
 
         debug!("sending request");
 
-        let (tx, rx) = oneshot_result();
-        tokio::spawn(
-            async move {
-                let start = time.now();
+        let start = time.now();
 
-                let connection = if let Some(connection) = self.connection {
-                    connection
-                } else if let Some(conn_type) = self.new_connection_type {
-                    info!("creating new connection");
-                    let connection = network
-                        .new_connection(start, remote_addr, host, conn_type)
-                        .await?;
+        let connection = if let Some(connection) = self.connection {
+            connection
+        } else if let Some(conn_type) = self.new_connection_type {
+            info!("creating new connection");
+            let connection = network
+                .new_connection(start, remote_addr, host, conn_type)
+                .await?;
 
+            connection
+        } else {
+            todo!()
+        };
 
-                    connection
-                    // (connection.id, Some(connection.timing))
-                } else {
-                    todo!()
-                };
+        // todo: fine-grained send timings for requests
+        let mut response = network.send_request(connection.clone(), request).await?;
 
-                // todo(fisher): fine-grained send timings for requests
-                let mut response = network.send_request(connection.clone(), request).await?;
+        let timing = {
+            let conn = connection.read().await;
+            conn.timing().clone()
+        };
 
-                let timing = {
-                    let conn = connection.read().await;
-                    conn.timing().clone()
-                };
+        debug!(?connection, "connection used");
 
-                debug!(?connection, "connection used");
+        response.extensions_mut().insert(timing);
 
-                response.extensions_mut().insert(timing);
-
-                if tx.send(Ok(response)).is_err() {
-                    error!("unable to send response");
-                }
-
-                Ok::<_, anyhow::Error>(())
-            }
-                .in_current_span(),
-        );
-
-        Ok(rx)
+        Ok(response)
     }
 }
 
