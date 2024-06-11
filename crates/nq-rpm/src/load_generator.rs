@@ -53,15 +53,13 @@ impl LoadGenerator {
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
         shutdown: ShutdownSignal,
-    ) -> anyhow::Result<OneshotResult<LoadedConnection>> {
-        let (tx, rx) = oneshot_result();
-
+    ) -> anyhow::Result<LoadedConnection> {
         let client = match direction {
             Direction::Down => ThroughputClient::download(),
             Direction::Up(size) => ThroughputClient::upload(size),
         };
 
-        let response_fut = client
+        let inflight_body = client
             .new_connection(conn_type)
             .headers(self.headers.clone())
             .send(
@@ -76,25 +74,12 @@ impl LoadGenerator {
 
         tracing::debug!("got loaded connection response future");
 
-        tokio::spawn(
-            async move {
-                let inflight_body = response_fut;
-
-                tracing::debug!("sending loaded connection");
-
-                let _ = tx.send(Ok(LoadedConnection {
-                    connection: inflight_body.connection,
-                    events_rx: inflight_body.events,
-                    total_bytes_series: CounterSeries::new(),
-                    finished_at: None,
-                }));
-
-                Ok::<_, anyhow::Error>(())
-            }
-            .in_current_span(),
-        );
-
-        Ok(rx)
+        Ok(LoadedConnection {
+            connection: inflight_body.connection,
+            events_rx: inflight_body.events,
+            total_bytes_series: CounterSeries::new(),
+            finished_at: None,
+        })
     }
 
     pub fn connections(&self) -> impl Iterator<Item = &LoadedConnection> {

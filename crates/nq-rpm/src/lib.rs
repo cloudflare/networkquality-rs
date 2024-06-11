@@ -402,27 +402,28 @@ impl Responsiveness {
         env: &Env,
         shutdown: ShutdownSignal,
     ) -> anyhow::Result<()> {
-        let oneshot_res = self.load_generator.new_loaded_connection(
+        match self.load_generator.new_loaded_connection(
             self.direction,
             ConnectionType::H2,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
             shutdown,
-        ).await?;
-
-        tokio::spawn(
-            async move {
-                let _ = match oneshot_res.await {
-                    Ok(conn) => event_tx.send(Event::NewLoadedConnection(conn)),
-                    Err(e) => event_tx.send(Event::Error(e)),
+        ).await {
+            Ok(conn) => {
+                if let Err(e) = event_tx.send(Event::NewLoadedConnection(conn)).await {
+                    error!("Failed to send NewLoadedConnection event: {}", e);
                 }
-                .await;
-            }
-            .in_current_span(),
-        );
+            },
+            Err(e) => {
+                if let Err(e) = event_tx.send(Event::Error(e)).await {
+                    error!("Failed to send Error event: {}", e);
+                }
+            },
+        }
 
         Ok(())
     }
+
 
     /// Sends a foreign probe which is a GET on a newly created connection.
     ///
