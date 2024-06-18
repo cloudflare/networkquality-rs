@@ -14,7 +14,6 @@ use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{client::wait_for_finish, Network};
 use nq_core::{ConnectionType, Time, Timestamp};
 use nq_stats::{instant_minus_intervals, TimeSeries};
-use shellflip::ShutdownSignal;
 use tokio::{select, sync::mpsc};
 use tracing::{debug, error, info, Instrument};
 use url::Url;
@@ -122,7 +121,6 @@ impl Responsiveness {
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        mut shutdown: ShutdownSignal,
     ) -> anyhow::Result<ResponsivenessResult> {
         let env = Env { time, network };
         self.start = env.time.now();
@@ -137,8 +135,8 @@ impl Responsiveness {
 
         let (event_tx, mut event_rx) = mpsc::channel(1024);
 
-        self.new_load_generating_connection(event_tx.clone(), &env, shutdown.clone())?;
-        self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+        self.new_load_generating_connection(event_tx.clone(), &env).await?;
+        self.send_foreign_probe(event_tx.clone(), &env).await?;
 
         loop {
             select! {
@@ -153,14 +151,14 @@ impl Responsiveness {
                             // There might not be an available load generating
                             // connection to send a self probe on. If that's the
                             // case, send another foreign probe.
-                            if !self.send_self_probe(event_tx.clone(), &env, shutdown.clone())? {
-                                self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+                            if !self.send_self_probe(event_tx.clone(), &env).await? {
+                                self.send_foreign_probe(event_tx.clone(), &env).await?;
                             }
                         }
                         Event::SelfProbe(s) => {
                             self.self_probe_results.add(s);
 
-                            self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+                            self.send_foreign_probe(event_tx.clone(), &env).await?;
                         }
                         Event::Error(e) => {
                             error!("error: {e}");
@@ -172,7 +170,7 @@ impl Responsiveness {
                     self.load_generator.update();
 
                     if let Some(interval) = interval.as_mut() {
-                        if self.on_interval(*interval, event_tx.clone(), &env, shutdown.clone()).await? {
+                        if self.on_interval(*interval, event_tx.clone(), &env).await? {
                             break;
                         }
 
@@ -180,10 +178,6 @@ impl Responsiveness {
                     } else {
                         interval = Some(0);
                     }
-                }
-                _ = shutdown.on_shutdown() => {
-                    debug!("shutdown requested");
-                    break;
                 }
             };
 
@@ -244,7 +238,6 @@ impl Responsiveness {
         interval: usize,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
     ) -> anyhow::Result<bool> {
         // Determine the currently interval and round it to the interval duration.
         let end_data_interval = self.start + self.config.interval_duration * interval as u32;
@@ -259,7 +252,7 @@ impl Responsiveness {
         if self.load_generator.count_loads() < self.config.max_loaded_connections
             && interval % 2 == 0
         {
-            self.new_load_generating_connection(event_tx, env, shutdown)?;
+            self.new_load_generating_connection(event_tx, env).await?;
         }
 
         let current_goodput = self.current_average_throughput(end_data_interval);
@@ -396,33 +389,32 @@ impl Responsiveness {
     /// as quickly as possible. The intent of these connections is to saturate
     /// a single connection's flow.
     #[tracing::instrument(skip_all)]
-    fn new_load_generating_connection(
+    async fn new_load_generating_connection(
         &self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
     ) -> anyhow::Result<()> {
-        let oneshot_res = self.load_generator.new_loaded_connection(
+        match self.load_generator.new_loaded_connection(
             self.direction,
             ConnectionType::H2,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
-            shutdown,
-        )?;
-
-        tokio::spawn(
-            async move {
-                let _ = match oneshot_res.await {
-                    Ok(conn) => event_tx.send(Event::NewLoadedConnection(conn)),
-                    Err(e) => event_tx.send(Event::Error(e)),
+        ).await {
+            Ok(conn) => {
+                if let Err(e) = event_tx.send(Event::NewLoadedConnection(conn)).await {
+                    error!("Failed to send NewLoadedConnection event: {}", e);
                 }
-                .await;
-            }
-            .in_current_span(),
-        );
+            },
+            Err(e) => {
+                if let Err(e) = event_tx.send(Event::Error(e)).await {
+                    error!("Failed to send Error event: {}", e);
+                }
+            },
+        }
 
         Ok(())
     }
+
 
     /// Sends a foreign probe which is a GET on a newly created connection.
     ///
@@ -433,11 +425,10 @@ impl Responsiveness {
     /// > for a video streaming client to launch and begin fetching media.
     ///
     /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3-3.1.1
-    fn send_foreign_probe(
+    async fn send_foreign_probe(
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
     ) -> anyhow::Result<()> {
         let inflight_body_fut = ThroughputClient::download()
             .new_connection(ConnectionType::H2)
@@ -445,13 +436,12 @@ impl Responsiveness {
                 self.config.small_download_url.as_str().parse()?,
                 Arc::clone(&env.network),
                 Arc::clone(&env.time),
-                shutdown,
-            )?;
+            ).await?;
 
         tokio::spawn(report_err(
             event_tx.clone(),
             async move {
-                let inflight_body = inflight_body_fut.await?;
+                let inflight_body = inflight_body_fut;
 
                 let finished_result = wait_for_finish(inflight_body.events).await?;
 
@@ -495,29 +485,27 @@ impl Responsiveness {
     /// > connection from scratch to do the same thing.
     ///
     /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3-3.2.1
-    fn send_self_probe(
+    async fn send_self_probe(
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
     ) -> anyhow::Result<bool> {
         // The test client should uniformly and randomly select from the active
         // load-generating connections on which to send self probes.
-        let Some(conn_id) = self.load_generator.random_connection() else {
+        let Some(connection) = self.load_generator.random_connection() else {
             return Ok(false);
         };
 
-        let inflight_body_fut = ThroughputClient::download().with_connection(conn_id).send(
+        let inflight_body_fut = ThroughputClient::download().with_connection(connection).send(
             self.config.small_download_url.as_str().parse()?,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
-            shutdown.clone(),
-        )?;
+        ).await?;
 
         tokio::spawn(report_err(
             event_tx.clone(),
             async move {
-                let inflight_body = inflight_body_fut.await?;
+                let inflight_body = inflight_body_fut;
 
                 let finish_result = wait_for_finish(inflight_body.events).await?;
                 debug!("self_probe_finished: {finish_result:?}");

@@ -4,20 +4,18 @@
 //! throughput of a flow.
 
 use std::{convert::Infallible, net::ToSocketAddrs, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 
 use anyhow::Context;
 use http::{HeaderMap, HeaderValue, Uri};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Incoming};
-use shellflip::ShutdownSignal;
-use tokio::select;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, Instrument};
 
-use crate::{
-    body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
-    oneshot_result, ConnectionId, ConnectionType, Network, OneshotResult, Time, Timestamp,
-};
+use crate::{body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
+            ConnectionType, Network, Time, Timestamp, EstablishedConnection};
+
 
 /// The default user agent for networkquality requests
 pub const MACH_USER_AGENT: &str = "mach/0.1.0";
@@ -41,7 +39,7 @@ pub enum Direction {
 /// The returned [`InflightBody`] can be used to track the progress of an upload
 /// or download and when it finishes.
 pub struct ThroughputClient {
-    conn_id: Option<ConnectionId>,
+    connection: Option<Arc<RwLock<EstablishedConnection>>>,
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
     direction: Direction,
@@ -51,7 +49,7 @@ impl ThroughputClient {
     /// Create an download oriented [`ThroughputClient`].
     pub fn download() -> Self {
         Self {
-            conn_id: None,
+            connection: None,
             new_connection_type: None,
             headers: None,
             direction: Direction::Down,
@@ -61,16 +59,16 @@ impl ThroughputClient {
     /// Create an upload oriented [`ThroughputClient`].
     pub fn upload(size: usize) -> Self {
         Self {
-            conn_id: None,
+            connection: None,
             new_connection_type: None,
             headers: None,
             direction: Direction::Up(size),
         }
     }
 
-    /// Send requests on the given [`ConnectionId`].
-    pub fn with_connection(mut self, conn_id: ConnectionId) -> Self {
-        self.conn_id = Some(conn_id);
+    /// Send requests on the given [`EstablishedConnection`].
+    pub fn with_connection(mut self, connection: Arc<RwLock<EstablishedConnection>>) -> Self {
+        self.connection = Some(connection);
         self
     }
 
@@ -87,14 +85,13 @@ impl ThroughputClient {
     }
 
     /// Execute a download or upload request against the given [`Uri`].
-    #[tracing::instrument(skip(self, network, time, shutdown))]
-    pub fn send(
+    #[tracing::instrument(skip(self, network, time))]
+    pub async fn send(
         self,
         uri: Uri,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        mut shutdown: ShutdownSignal,
-    ) -> anyhow::Result<OneshotResult<InflightBody>> {
+    ) -> anyhow::Result<InflightBody> {
         let mut headers = self.headers.unwrap_or_default();
 
         if !headers.contains_key("User-Agent") {
@@ -109,7 +106,6 @@ impl ThroughputClient {
             Direction::Up(_) => "POST",
         };
 
-        let (tx, rx) = oneshot_result();
         let mut events = None;
 
         let body: NqBody = match self.direction {
@@ -141,114 +137,92 @@ impl ThroughputClient {
 
         *request.headers_mut() = headers.clone();
 
-        tokio::spawn(
-            async move {
-                let start = time.now();
+        let start = time.now();
 
-                let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
-                    tracing::debug!("using conn_id={conn_id:?}");
+        let connection = if let Some(connection) = self.connection {
+            connection
+        } else if let Some(conn_type) = self.new_connection_type {
+            info!("creating new connection to {host_with_port}");
 
-                    (conn_id, None)
-                } else if let Some(conn_type) = self.new_connection_type {
-                    info!("creating new connection to {host_with_port}");
+            let addrs = network
+                .resolve(host_with_port)
+                .await
+                .context("unable to resolve host")?;
 
-                    let addrs = network
-                        .resolve(host_with_port)
-                        .await
-                        .context("unable to resolve host")?;
+            debug!("addrs: {addrs:?}");
 
-                    debug!("addrs: {addrs:?}");
+            let connection = network
+                .new_connection(start, addrs[0], host, conn_type)
+                .await
+                .context("creating new connection")?;
 
-                    let time_lookup = time.now();
+            connection
+        } else {
+            todo!()
+        };
 
-                    let mut connection = network
-                        .new_connection(start, addrs[0], host, conn_type)
-                        .await
-                        .context("creating new connection")?;
+        let conn_timing = {
+            let conn = connection.read().await;
+            conn.timing().clone()
+        };
 
-                    connection.timing.set_lookup(time_lookup);
+        debug!("connection used");
+        let response_fut = network.send_request(connection.clone(), request).await?;
 
-                    (connection.id, Some(connection.timing))
-                } else {
-                    todo!()
-                };
+        let response_body = match self.direction {
+            Direction::Up(_) => {
+                debug!("sending upload events");
 
-                debug!(?conn_id, "connection used");
-                let response_fut = network.send_request(conn_id, request);
+                InflightBody {
+                    connection: connection.clone(),
+                    timing: Some(conn_timing),
+                    events: events.expect("events were set above"),
+                    start,
+                    headers,
+                }
+            }
+            Direction::Down => {
+                let (parts, incoming) = response_fut.into_parts();
 
-                let mut response_body = match self.direction {
-                    Direction::Up(_) => {
-                        debug!("sending upload events");
-                        if tx
-                            .send(Ok(InflightBody {
-                                conn_id,
-                                timing,
-                                events: events.expect("events were set above"),
-                                start,
-                                headers,
-                            }))
-                            .is_err()
-                        {
-                            error!("error sending upload events");
-                        }
+                let (counting_body, events) = CountingBody::new(
+                    incoming,
+                    Duration::from_millis(100),
+                    Arc::clone(&time),
+                );
 
-                        let (parts, incoming) = response_fut.await?.into_parts();
-                        info!("upload response parts: {:?}", parts);
-
-                        incoming.boxed()
-                    }
-                    Direction::Down => {
-                        let (parts, incoming) = response_fut.await?.into_parts();
-
-                        let (counting_body, events) = CountingBody::new(
-                            incoming,
-                            Duration::from_millis(100),
-                            Arc::clone(&time),
-                        );
-
-                        debug!("sending download events");
-                        if tx
-                            .send(Ok(InflightBody {
-                                conn_id,
-                                timing,
-                                start,
-                                events,
-                                headers: parts.headers,
-                            }))
-                            .is_err()
-                        {
-                            error!("error sending download events");
-                        }
-
-                        counting_body.boxed()
-                    }
-                };
+                debug!("sending download events");
 
                 tokio::spawn(
                     async move {
-                        // Consume the response body and keep the connection
-                        // alive. Stop if we hit an error.
+                        // Consume the response body and keep the connection alive. Stop if we hit an error.
                         info!("waiting for response body");
 
+                        let mut counting_body = counting_body;
+
                         loop {
-                            select! {
-                                Some(res) = response_body.frame() => if let Err(e) = res {
+                            if let Some(res) = counting_body.frame().await {
+                                if let Err(e) = res {
                                     error!("body closing: {e}");
                                     break;
-                                },
-                                _ = shutdown.on_shutdown() => break,
+                                }
+                            } else {
+                                break;
                             }
                         }
-                    }
-                    .in_current_span(),
+                    }.in_current_span(),
                 );
 
-                Ok::<_, anyhow::Error>(())
+                InflightBody {
+                    connection: connection.clone(),
+                    timing: Some(conn_timing),
+                    start,
+                    events,
+                    headers: parts.headers,
+                }
             }
-            .in_current_span(),
-        );
+        };
 
-        Ok(rx)
+        Ok(response_body)
     }
 }
 
@@ -258,16 +232,16 @@ impl ThroughputClient {
 /// if it exits.
 #[derive(Default)]
 pub struct Client {
-    conn_id: Option<ConnectionId>,
+    connection: Option<Arc<RwLock<EstablishedConnection>>>,
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
     method: Option<String>,
 }
 
 impl Client {
-    /// Send requests on the given [`ConnectionId`].
-    pub fn with_connection(mut self, conn_id: ConnectionId) -> Self {
-        self.conn_id = Some(conn_id);
+    /// Send requests on the given [`EstablishedConnection`].
+    pub fn with_connection(mut self, connection: Arc<RwLock<EstablishedConnection>>) -> Self {
+        self.connection = Some(connection);
         self
     }
 
@@ -292,15 +266,15 @@ impl Client {
     /// Send a request to the given uri with the given body, timing how long it
     /// took.
     #[tracing::instrument(skip(self, body, network, time))]
-    pub fn send<B>(
+    pub async fn send<B>(
         self,
         uri: Uri,
         body: B,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-    ) -> anyhow::Result<OneshotResult<http::Response<Incoming>>>
-    where
-        B: Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static,
+    ) -> anyhow::Result<http::Response<Incoming>>
+        where
+            B: Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static,
     {
         let mut headers = self.headers.unwrap_or_default();
 
@@ -326,42 +300,34 @@ impl Client {
 
         debug!("sending request");
 
-        let (tx, rx) = oneshot_result();
-        tokio::spawn(
-            async move {
-                let start = time.now();
+        let start = time.now();
 
-                let (conn_id, timing) = if let Some(conn_id) = self.conn_id {
-                    (conn_id, None)
-                } else if let Some(conn_type) = self.new_connection_type {
-                    info!("creating new connection");
-                    let connection = network
-                        .new_connection(start, remote_addr, host, conn_type)
-                        .await?;
+        let connection = if let Some(connection) = self.connection {
+            connection
+        } else if let Some(conn_type) = self.new_connection_type {
+            info!("creating new connection");
+            let connection = network
+                .new_connection(start, remote_addr, host, conn_type)
+                .await?;
 
-                    (connection.id, Some(connection.timing))
-                } else {
-                    todo!()
-                };
+            connection
+        } else {
+            todo!()
+        };
 
-                debug!(?conn_id, "connection used");
-                // todo(fisher): fine-grained send timings for requests
-                let mut response = network.send_request(conn_id, request).await?;
+        // todo: fine-grained send timings for requests
+        let mut response = network.send_request(connection.clone(), request).await?;
 
-                if let Some(timing) = timing {
-                    response.extensions_mut().insert(timing);
-                }
+        let timing = {
+            let conn = connection.read().await;
+            conn.timing().clone()
+        };
 
-                if tx.send(Ok(response)).is_err() {
-                    error!("unable to send response");
-                }
+        debug!(?connection, "connection used");
 
-                Ok::<_, anyhow::Error>(())
-            }
-            .in_current_span(),
-        );
+        response.extensions_mut().insert(timing);
 
-        Ok(rx)
+        Ok(response)
     }
 }
 

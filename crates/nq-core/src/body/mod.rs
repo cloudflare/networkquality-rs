@@ -2,6 +2,8 @@ mod counting_body;
 mod upload_body;
 
 use std::convert::Infallible;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use http::{HeaderMap, HeaderValue};
 use http_body_util::{combinators::BoxBody, Empty};
@@ -16,7 +18,7 @@ pub fn empty() -> Empty<Bytes> {
     Empty::new()
 }
 
-use crate::{connection::ConnectionTiming, ConnectionId, Timestamp};
+use crate::{connection::ConnectionTiming, EstablishedConnection, Timestamp};
 
 pub use self::{
     counting_body::{BodyEvent, CountingBody},
@@ -26,7 +28,7 @@ pub use self::{
 /// A body that is currently being sent or received.
 pub struct InflightBody {
     pub start: Timestamp,
-    pub conn_id: ConnectionId,
+    pub connection: Arc<RwLock<EstablishedConnection>>,
     pub timing: Option<ConnectionTiming>,
     pub events: mpsc::UnboundedReceiver<BodyEvent>,
     pub headers: HeaderMap<HeaderValue>,

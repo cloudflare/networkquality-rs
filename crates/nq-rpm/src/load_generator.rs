@@ -1,18 +1,14 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
-use nq_core::{
-    oneshot_result, BodyEvent, ConnectionId, ConnectionType, Network, OneshotResult, Time,
-    Timestamp,
-};
+use nq_core::{BodyEvent, ConnectionType, Network,
+              Time, Timestamp, EstablishedConnection};
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
-use shellflip::ShutdownSignal;
 use tokio::sync::mpsc::{UnboundedReceiver};
-use tracing::Instrument;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Deserialize)]
 pub struct LoadConfig {
@@ -46,23 +42,20 @@ impl LoadGenerator {
         })
     }
 
-    #[tracing::instrument(skip(self, network, time, shutdown))]
-    pub fn new_loaded_connection(
+    #[tracing::instrument(skip(self, network, time))]
+    pub async fn new_loaded_connection(
         &self,
         direction: Direction,
         conn_type: ConnectionType,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        shutdown: ShutdownSignal,
-    ) -> anyhow::Result<OneshotResult<LoadedConnection>> {
-        let (tx, rx) = oneshot_result();
-
+    ) -> anyhow::Result<LoadedConnection> {
         let client = match direction {
             Direction::Down => ThroughputClient::download(),
             Direction::Up(size) => ThroughputClient::upload(size),
         };
 
-        let response_fut = client
+        let inflight_body = client
             .new_connection(conn_type)
             .headers(self.headers.clone())
             .send(
@@ -72,41 +65,25 @@ impl LoadGenerator {
                 },
                 network,
                 time,
-                shutdown,
-            )?;
+            ).await?;
 
         tracing::debug!("got loaded connection response future");
 
-        tokio::spawn(
-            async move {
-                let inflight_body = response_fut
-                    .await
-                    .context("could not await response for loaded connection")?;
-
-                tracing::debug!("sending loaded connection");
-
-                let _ = tx.send(Ok(LoadedConnection {
-                    conn_id: inflight_body.conn_id,
-                    events_rx: inflight_body.events,
-                    total_bytes_series: CounterSeries::new(),
-                    finished_at: None,
-                }));
-
-                Ok::<_, anyhow::Error>(())
-            }
-            .in_current_span(),
-        );
-
-        Ok(rx)
+        Ok(LoadedConnection {
+            connection: inflight_body.connection,
+            events_rx: inflight_body.events,
+            total_bytes_series: CounterSeries::new(),
+            finished_at: None,
+        })
     }
 
     pub fn connections(&self) -> impl Iterator<Item = &LoadedConnection> {
         self.loads.iter()
     }
 
-    pub fn random_connection(&self) -> Option<ConnectionId> {
+    pub fn random_connection(&self) -> Option<Arc<RwLock<EstablishedConnection>>> {
         let loads: Vec<_> = self.ongoing_loads().collect();
-        loads.choose(&mut rand::thread_rng()).map(|c| c.conn_id)
+        loads.choose(&mut rand::thread_rng()).map(|c| c.connection.clone())
     }
 
     pub fn push(&mut self, loaded_connection: LoadedConnection) {
@@ -134,7 +111,7 @@ impl LoadGenerator {
 
 #[derive(Debug)]
 pub struct LoadedConnection {
-    conn_id: ConnectionId,
+    connection: Arc<RwLock<EstablishedConnection>>,
     events_rx: UnboundedReceiver<BodyEvent>,
     total_bytes_series: CounterSeries,
     finished_at: Option<Timestamp>,

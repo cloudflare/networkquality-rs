@@ -6,7 +6,6 @@ use http_body_util::BodyExt;
 use nq_core::Network;
 use nq_core::{ConnectionType, Time, Timestamp};
 use nq_stats::TimeSeries;
-use shellflip::ShutdownSignal;
 use tracing::info;
 use url::Url;
 
@@ -46,7 +45,6 @@ impl Latency {
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        _shutdown: ShutdownSignal,
     ) -> anyhow::Result<LatencyResult> {
         self.start = time.now();
 
@@ -68,17 +66,21 @@ impl Latency {
                 .context("unable to resolve host")?;
             let time_lookup = time.now();
 
-            let mut connection = network
+            let connection = network
                 .new_connection(conn_start, addrs[0], host.to_string(), ConnectionType::H1)
                 .await
                 .context("unable to create new connection")?;
+            {
+                let conn = connection.write().await;
+                conn.timing().set_lookup(time_lookup);
+            }
 
-            connection.timing.set_lookup(time_lookup);
-
-            let tcp_handshake_duration = connection
-                .timing
-                .time_connect()
-                .saturating_sub(connection.timing.time_lookup());
+            let tcp_handshake_duration = {
+                let conn = connection.read().await;
+                conn.timing()
+                    .time_connect()
+                    .saturating_sub(conn.timing().time_lookup())
+            };
 
             info!(
                 "latency run {run}: {:2.4} s.",
@@ -88,7 +90,7 @@ impl Latency {
             // perform a simple GET to do some amount of work
             let response = network
                 .send_request(
-                    connection.id,
+                    connection,
                     Request::get(url.as_str()).body(Default::default())?,
                 )
                 .await

@@ -11,3 +11,4 @@ nq-core = { workspace = true }
 shellflip = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tracing = { workspace = true }
+async-trait = "0.1.79"

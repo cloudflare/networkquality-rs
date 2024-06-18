@@ -16,11 +16,11 @@ mod util;
 
 pub use crate::{
     body::{BodyEvent, CountingBody, NqBody},
-    connection::{ConnectionId, ConnectionMap, ConnectionTiming, ConnectionType, NewConnection},
+    connection::{ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection},
     network::Network,
     time::{Time, Timestamp, TokioTime},
     upgraded::ConnectUpgraded,
-    util::{oneshot_result, OneshotResult, ResponseFuture},
+    util::{ResponseFuture},
 };
 
 pub use anyhow::Error;
