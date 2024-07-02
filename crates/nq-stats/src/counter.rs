@@ -1,8 +1,6 @@
 // Copyright (c) 2023-2024 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
-// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
-
 use nq_core::Timestamp;
 use tracing::debug;
 
@@ -129,6 +127,10 @@ mod tests {
 
     use crate::{counter::CounterSeries, instant_minus_intervals};
 
+    fn avg_first_n(n: f64) -> f64 {
+        (n + 1.0) / 2.0
+    }
+
     #[test]
     fn average_simple() {
         let mut ts = CounterSeries::new();
@@ -157,11 +159,11 @@ mod tests {
         }
 
         let total_avg = ts.average().unwrap();
-        assert_eq!(total_avg, 1.0);
+        assert_eq!(total_avg, avg_first_n(10.0));
 
         let to = start + interval_length * 10 + Duration::from_millis(1);
         let from = instant_minus_intervals(to, intervals, interval_length);
         let interval_avg = ts.interval_average(from, to).unwrap();
-        assert_eq!(interval_avg, 1.0); // (10 - 6) / 4
+        assert_eq!(interval_avg, 8.5); // (10 + 9 + 8 + 7) / 4
     }
 }
