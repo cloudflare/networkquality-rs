@@ -3,7 +3,7 @@
 networkquality-rs is a collection of tools for measuring the quality of a
 network. This repo provides a CLI tool `mach` which can be used to run multiple
 different tests. The main focus of `mach` and this repo is to implement the IETF
-draft: ["Responsiveness under Working Conditions"](draft). 
+draft: ["Responsiveness under Working Conditions"](draft).
 
 The draft defines "responsiveness", measured in **R**ound trips **P**er
 **M**inute (RPM), as a useful measurement of network quality. `mach`'s default
@@ -15,6 +15,7 @@ responsiveness servers.
 First, [install rust](https://www.rust-lang.org/tools/install).
 
 Then build and run the binary at `./target/release/mach`:
+
 ```shell
 cargo build --release
 
@@ -23,6 +24,7 @@ cargo build --release
 ```
 
 Or install it with cargo:
+
 ```shell
 cargo install --path ./cli
 
@@ -41,6 +43,7 @@ Use `mach help` to see a list of subcommands and `mach help <subcommand>` or
 ## Examples
 
 Running a responsiveness test:
+
 ```shell
 mach rpm
 {
@@ -59,15 +62,20 @@ mach rpm
 }
 ```
 
-> By default this measures responsiveness against Cloudflare's responsiveness
-server.
+> RPM reports are automatically uploaded to Cloudflare's aim database and are
+> anonymous. See https://blog.cloudflare.com/aim-database-for-internet-quality/
+> for more information.
+>
+> Use `--disable-aim-scores` to disable uploading reports.
 
-Running a responsiveness test with Apple's server: 
+Running a responsiveness test with Apple's server:
+
 ```shell
 mach rpm -c https://mensura.cdn-apple.com/.well-known/nq
 ```
 
 Timing the download of a resource:
+
 ```shell
 mach download https://cloudflare.com/cdn-cgi/trace
  time_lookup: 0.0000
@@ -80,6 +88,7 @@ time_connect: 0.0531
 ```
 
 Measuring latency using TCP connection timing:
+
 ```shell
 mach rtt
 {
@@ -118,8 +127,7 @@ directory. They are combined together to form the `mach` cli under `./cli`.
   over an abstracted IO transport: `ByteStream`. Finally, it provides a
   low-level HTTP `Client` used to send arbitrary HTTP requests as well as a
   `ThroughputClient` which uses a special `CountingBody` to measure the
-  throughput of an HTTP connection. Finally, it provides a very simple
-  `Speedtest` trait used for running and reporting the results of a test.
+  throughput of an HTTP connection.
 
 - `nq-tokio-network`: a `Network` implementation based on tokio (and indirectly
   on hyper).)
@@ -132,8 +140,8 @@ directory. They are combined together to form the `mach` cli under `./cli`.
 - `nq-stats`: provides `Timeseries` and `Counter` types for storing measurements
   and running simple statisitcs on those series.
 
-- `nq-rpm`: a speedtest which implements the ["Responsiveness under Working
-  Conditions"](draft) draft.
+- `nq-rpm`: a speedtest which implements the
+  ["Responsiveness under Working Conditions"](draft) draft.
 
 - `nq-latency`: a speedtest which measures latency by timing how long it takes
   to setup multiple TCP connections.
@@ -147,19 +155,19 @@ directory. They are combined together to form the `mach` cli under `./cli`.
 - [ ] better TUI experience for all commands.
 - [ ] QUIC support.
 - [ ] MASQUE proxying support.
-    - [ ] support RPK TLS.
+  - [ ] support RPK TLS.
 - [ ] Output format:
-    - [x] JSON
-      - [ ] determine stability / extensions.
-    - [ ] Human output
+  - [x] JSON
+    - [ ] determine stability / extensions.
+  - [ ] Human output
 - [x] send AIM score reports
 - [ ] automated testing
-    - [ ] latency comparisions with curl
-    - [ ] RPM comparisions with different tools against the same server
-    - [ ] review/better test statistics
+  - [ ] latency comparisions with curl
+  - [ ] RPM comparisions with different tools against the same server
+  - [ ] review/better test statistics
 - [ ] socket stats for measuring connection throughput
-- [ ] RPM stability decreases as interval duration decreases. Look into calculating
-  a better `CountingBody` update rate.
+- [ ] RPM stability decreases as interval duration decreases. Look into
+      calculating a better `CountingBody` update rate.
 - [x] Properly signal the connections on a network to shutdown.
 
 [draft]: https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03
