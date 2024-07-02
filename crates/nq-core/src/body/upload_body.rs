@@ -1,13 +1,13 @@
+use bytes::BytesMut;
 use std::{
     convert::Infallible,
     pin::Pin,
     task::{Context, Poll},
 };
-use bytes::BytesMut;
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use tracing::trace;
 
 /// A body that continually uploads a chunk of random bytes until

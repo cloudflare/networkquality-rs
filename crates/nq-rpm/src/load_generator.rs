@@ -1,17 +1,18 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{
-    oneshot_result, BodyEvent, ConnectionId, ConnectionType, Network, OneshotResult, Time,
+    oneshot_result, BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, Time,
     Timestamp,
 };
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
 use shellflip::ShutdownSignal;
-use tokio::sync::mpsc::{UnboundedReceiver};
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::RwLock;
 use tracing::Instrument;
 
 #[derive(Debug, Deserialize)]
@@ -86,7 +87,7 @@ impl LoadGenerator {
                 tracing::debug!("sending loaded connection");
 
                 let _ = tx.send(Ok(LoadedConnection {
-                    conn_id: inflight_body.conn_id,
+                    connection: inflight_body.connection,
                     events_rx: inflight_body.events,
                     total_bytes_series: CounterSeries::new(),
                     finished_at: None,
@@ -104,9 +105,11 @@ impl LoadGenerator {
         self.loads.iter()
     }
 
-    pub fn random_connection(&self) -> Option<ConnectionId> {
+    pub fn random_connection(&self) -> Option<Arc<RwLock<EstablishedConnection>>> {
         let loads: Vec<_> = self.ongoing_loads().collect();
-        loads.choose(&mut rand::thread_rng()).map(|c| c.conn_id)
+        loads
+            .choose(&mut rand::thread_rng())
+            .map(|c| c.connection.clone())
     }
 
     pub fn push(&mut self, loaded_connection: LoadedConnection) {
@@ -134,7 +137,7 @@ impl LoadGenerator {
 
 #[derive(Debug)]
 pub struct LoadedConnection {
-    conn_id: ConnectionId,
+    connection: Arc<RwLock<EstablishedConnection>>,
     events_rx: UnboundedReceiver<BodyEvent>,
     total_bytes_series: CounterSeries,
     finished_at: Option<Timestamp>,
@@ -158,10 +161,4 @@ impl LoadedConnection {
         self.events_rx.close();
         self.update();
     }
-}
-
-#[derive(Debug)]
-pub struct LoadTestResult {
-    pub total_bytes: usize,
-    pub total_time: Duration,
 }

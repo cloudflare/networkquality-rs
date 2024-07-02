@@ -8,7 +8,7 @@ use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
 use shellflip::{ShutdownCoordinator, ShutdownSignal};
-use tokio::time::{timeout};
+use tokio::time::timeout;
 use tracing::{debug, error, info};
 
 use crate::aim_report::CloudflareAimResults;
@@ -118,7 +118,13 @@ async fn run_test(
     )) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
-    let result = rpm.run_test(network, time, ShutdownSignal::from(&*shutdown_coordinator.handle())).await?;
+    let result = rpm
+        .run_test(
+            network,
+            time,
+            ShutdownSignal::from(&*shutdown_coordinator.handle()),
+        )
+        .await?;
 
     debug!("shutting down rpm test");
     shutdown_coordinator.shutdown_with_timeout(1).await;

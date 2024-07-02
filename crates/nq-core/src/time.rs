@@ -14,7 +14,9 @@ pub struct Timestamp(Instant);
 impl Timestamp {
     /// Calculate the saturating duration since an earlier timestamp.
     pub fn duration_since(&self, earlier: Timestamp) -> Duration {
-        self.0.checked_duration_since(earlier.0).unwrap_or_else(|| Duration::from_secs(0))
+        self.0
+            .checked_duration_since(earlier.0)
+            .unwrap_or_else(|| Duration::from_secs(0))
     }
 
     /// Calculate the duration elapsed since the creation of this timestamp.
@@ -63,8 +65,8 @@ pub trait Time: Send + Sync {
 }
 
 impl<T: Time> Time for Arc<T>
-    where
-        T: Time,
+where
+    T: Time,
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
@@ -72,8 +74,8 @@ impl<T: Time> Time for Arc<T>
 }
 
 impl<T: Time> Time for Box<T>
-    where
-        T: Time,
+where
+    T: Time,
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)
@@ -81,8 +83,8 @@ impl<T: Time> Time for Box<T>
 }
 
 impl<T: Time> Time for &T
-    where
-        T: Time,
+where
+    T: Time,
 {
     fn now(&self) -> Timestamp {
         <T as Time>::now(self)

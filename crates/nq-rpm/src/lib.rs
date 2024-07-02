@@ -269,7 +269,7 @@ impl Responsiveness {
         let std_goodput = self
             .average_goodput_series
             .interval_std(start_data_interval, end_data_interval)
-            .unwrap_or(std::f64::MAX);
+            .unwrap_or(f64::MAX);
 
         // Goodput is saturated if the std of the last MAD goodputs is within
         // tolerance % of the current_average.
@@ -503,16 +503,18 @@ impl Responsiveness {
     ) -> anyhow::Result<bool> {
         // The test client should uniformly and randomly select from the active
         // load-generating connections on which to send self probes.
-        let Some(conn_id) = self.load_generator.random_connection() else {
+        let Some(connection) = self.load_generator.random_connection() else {
             return Ok(false);
         };
 
-        let inflight_body_fut = ThroughputClient::download().with_connection(conn_id).send(
-            self.config.small_download_url.as_str().parse()?,
-            Arc::clone(&env.network),
-            Arc::clone(&env.time),
-            shutdown.clone(),
-        )?;
+        let inflight_body_fut = ThroughputClient::download()
+            .with_connection(connection)
+            .send(
+                self.config.small_download_url.as_str().parse()?,
+                Arc::clone(&env.network),
+                Arc::clone(&env.time),
+                shutdown.clone(),
+            )?;
 
         tokio::spawn(report_err(
             event_tx.clone(),

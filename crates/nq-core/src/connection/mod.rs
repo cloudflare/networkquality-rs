@@ -5,27 +5,8 @@ use std::time::Duration;
 
 use crate::Timestamp;
 
-pub use self::map::ConnectionMap;
-
-/// Identifies a unique connection to some origin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ConnectionId(usize);
-
-impl ConnectionId {
-    /// Creates a new [`ConnectionId`].
-    pub fn new() -> Self {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static PREVIOUS_ID: AtomicUsize = AtomicUsize::new(0);
-
-        ConnectionId(PREVIOUS_ID.fetch_add(1, Ordering::SeqCst))
-    }
-}
-
-impl Default for ConnectionId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub use self::http::EstablishedConnection;
+pub use self::map::ConnectionManager;
 
 /// The L7 type of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,14 +17,6 @@ pub enum ConnectionType {
     H2,
     /// Create an HTTP/3 connection.
     H3,
-}
-
-/// Describes the result of new connection created from a [`crate::network::Network`].
-pub struct NewConnection {
-    /// The connection's internal ID.
-    pub id: ConnectionId,
-    /// The timing stats around creating a connection.
-    pub timing: ConnectionTiming,
 }
 
 /// Timing stats for the establishment of a connection. All durations
