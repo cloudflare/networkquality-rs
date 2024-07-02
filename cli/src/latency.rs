@@ -48,7 +48,13 @@ pub async fn run_test(config: &LatencyConfig) -> anyhow::Result<LatencyResult> {
     )) as Arc<dyn Network>;
 
     let rtt = Latency::new(config.clone());
-    let results = rtt.run_test(network, time, ShutdownSignal::from(&*shutdown_coordinator.handle())).await?;
+    let results = rtt
+        .run_test(
+            network,
+            time,
+            ShutdownSignal::from(&*shutdown_coordinator.handle()),
+        )
+        .await?;
 
     Ok(results)
 }

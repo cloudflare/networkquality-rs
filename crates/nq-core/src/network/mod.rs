@@ -1,9 +1,9 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+use crate::{body::NqBody, ConnectionType, EstablishedConnection, OneshotResult, Timestamp};
 use http::Response;
 use hyper::body::Incoming;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::{body::NqBody, Timestamp, ConnectionType, OneshotResult, EstablishedConnection};
 
 /// A network abstraction for resolving hosts, creating connections, and sending requests.
 pub trait Network: Send + Sync + 'static {
@@ -26,7 +26,6 @@ pub trait Network: Send + Sync + 'static {
         request: http::Request<NqBody>,
     ) -> OneshotResult<Response<Incoming>>;
 }
-
 
 impl Network for Arc<dyn Network> {
     fn resolve(&self, host: String) -> OneshotResult<Vec<SocketAddr>> {

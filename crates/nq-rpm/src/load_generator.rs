@@ -1,15 +1,17 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
-use nq_core::{oneshot_result, BodyEvent, ConnectionType, Network, OneshotResult,
-              Time, Timestamp, EstablishedConnection};
+use nq_core::{
+    oneshot_result, BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, Time,
+    Timestamp,
+};
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
 use shellflip::ShutdownSignal;
-use tokio::sync::mpsc::{UnboundedReceiver};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
@@ -105,7 +107,9 @@ impl LoadGenerator {
 
     pub fn random_connection(&self) -> Option<Arc<RwLock<EstablishedConnection>>> {
         let loads: Vec<_> = self.ongoing_loads().collect();
-        loads.choose(&mut rand::thread_rng()).map(|c| c.connection.clone())
+        loads
+            .choose(&mut rand::thread_rng())
+            .map(|c| c.connection.clone())
     }
 
     pub fn push(&mut self, loaded_connection: LoadedConnection) {
@@ -157,10 +161,4 @@ impl LoadedConnection {
         self.events_rx.close();
         self.update();
     }
-}
-
-#[derive(Debug)]
-pub struct LoadTestResult {
-    pub total_bytes: usize,
-    pub total_time: Duration,
 }

@@ -10,13 +10,8 @@ nq-core = { workspace = true }
 nq-stats = { workspace = true }
 
 anyhow = { workspace = true, features = ["backtrace"] }
-humansize = "*"
 http = { workspace = true }
 http-body-util = { workspace = true }
-hyper = { workspace = true }
-rand = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 shellflip = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }

@@ -111,7 +111,7 @@ mod tests {
         let mut ts = CounterSeries::new();
         assert_eq!(ts.average(), None);
 
-        let now = Timestamp::now_std();
+        let now = Timestamp::now();
 
         for n in 0..10 {
             ts.add(now + n * Duration::from_secs(1), n as f64);
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn average_intervaled() {
         let mut ts = CounterSeries::new();
-        let start = Timestamp::now_std();
+        let start = Timestamp::now();
 
         let intervals = 4;
         let interval_length = Duration::from_secs(1);

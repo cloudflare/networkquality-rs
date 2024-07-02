@@ -17,11 +17,11 @@ nq-tokio-network = { path = "./crates/nq-tokio-network" }
 
 anyhow = "1.0"
 async-trait = { version = "0.1" }
-boring = { git = "https://github.com/cloudflare/boring", rev = "abfe2f798094d8b5855592aec8b5b90e3c2197e2" }
+boring = "4.1"
 clap = "4.3"
 clap-verbosity-flag = "2.1"
 http = "1.0"
-http-body-util = "0.1.0-rc.3"
+http-body-util = "0.1.2"
 hyper = "1.0"
 hyper-util = "0.1"
 pin-project-lite = "0.2"
@@ -33,6 +33,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 tokio = "1.0"
 tokio-util = "0.7"
-tokio-boring = { git = "https://github.com/cloudflare/boring", rev = "abfe2f798094d8b5855592aec8b5b90e3c2197e2" }
+tokio-boring = "4.1"
 ureq = "2.8"
 url = "2.4"

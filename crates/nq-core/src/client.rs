@@ -15,9 +15,10 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, Instrument};
 
-use crate::{body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody}, oneshot_result,
-            ConnectionType, Network, OneshotResult, Time, Timestamp, EstablishedConnection};
-
+use crate::{
+    body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
+    oneshot_result, ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
+};
 
 /// The default user agent for networkquality requests
 pub const MACH_USER_AGENT: &str = "mach/0.1.0";
@@ -157,19 +158,17 @@ impl ThroughputClient {
 
                     debug!("addrs: {addrs:?}");
 
-                    let connection = network
+                    network
                         .new_connection(start, addrs[0], host, conn_type)
                         .await
-                        .context("creating new connection")?;
-
-                    connection
+                        .context("creating new connection")?
                 } else {
                     todo!()
                 };
 
                 let conn_timing = {
                     let conn = connection.read().await;
-                    conn.timing().clone()
+                    conn.timing()
                 };
 
                 debug!("connection used");
@@ -238,12 +237,12 @@ impl ThroughputClient {
                             }
                         }
                     }
-                        .in_current_span(),
+                    .in_current_span(),
                 );
 
                 Ok::<_, anyhow::Error>(())
             }
-                .in_current_span(),
+            .in_current_span(),
         );
 
         Ok(rx)
@@ -333,13 +332,9 @@ impl Client {
                     connection
                 } else if let Some(conn_type) = self.new_connection_type {
                     info!("creating new connection");
-                    let connection = network
+                    network
                         .new_connection(start, remote_addr, host, conn_type)
-                        .await?;
-
-
-                    connection
-                    // (connection.id, Some(connection.timing))
+                        .await?
                 } else {
                     todo!()
                 };
@@ -349,7 +344,7 @@ impl Client {
 
                 let timing = {
                     let conn = connection.read().await;
-                    conn.timing().clone()
+                    conn.timing()
                 };
 
                 debug!(?connection, "connection used");

@@ -1,9 +1,16 @@
 //! Structures and utilities for reporting data to Cloudflare's AIM aggregation.
 
-use nq_core::client::MACH_USER_AGENT;
+use std::sync::Arc;
+
+use http::{HeaderMap, HeaderValue};
+use http_body_util::BodyExt;
+use nq_core::client::{Client, MACH_USER_AGENT};
+use nq_core::{Time, TokioTime};
 use nq_latency::LatencyResult;
 use nq_rpm::{LoadedConnection, ResponsivenessResult};
+use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
+use shellflip::ShutdownHandle;
 use tracing::debug;
 
 use crate::util::{pretty_ms, pretty_secs_to_ms};
@@ -75,22 +82,42 @@ impl CloudflareAimResults {
         let results = self.clone();
         let origin = self.origin.clone();
 
-        let response = tokio::task::spawn_blocking(move || {
-            match ureq::post("https://aim.cloudflare.com/__log")
-                .set("User-Agent", MACH_USER_AGENT)
-                .set("Origin", &origin)
-                .send_json(results)
-            {
-                Err(ureq::Error::Status(_, resp)) => Ok(resp),
-                resp => resp,
-            }
-        })
-        .await??;
+        let shutdown_handle = ShutdownHandle::default();
+        let time = Arc::new(TokioTime::new());
+        let network = Arc::new(TokioNetwork::new(
+            Arc::clone(&time) as Arc<dyn Time>,
+            Arc::new(shutdown_handle),
+        ));
 
-        let (status, status_text) = (response.status(), response.status_text().to_string());
-        let body = response.into_string()?;
+        let mut headers = HeaderMap::new();
+        headers.append(
+            "User-Agent",
+            HeaderValue::from_str(MACH_USER_AGENT).unwrap(),
+        );
+        headers.append("Origin", HeaderValue::from_str(origin.as_str()).unwrap());
+        headers.append("Content-Type", HeaderValue::from_static("application/json"));
+        let body = serde_json::to_string(&results).unwrap();
 
-        debug!("aim upload response: {status} ({status_text}); {body}");
+        let response = Client::default()
+            .new_connection(nq_core::ConnectionType::H2)
+            .new_connection(nq_core::ConnectionType::H2)
+            .headers(headers)
+            .method("POST")
+            .send(
+                "https://aim.cloudflare.com/__log".parse().unwrap(),
+                body,
+                network,
+                time,
+            )?
+            .await?;
+
+        let (status, status_text) = (response.status(), response.status().to_string());
+        let body = response.into_body().collect().await?.to_bytes();
+
+        debug!(
+            "aim upload response: {status} ({status_text}); {}",
+            String::from_utf8_lossy(&body)
+        );
 
         if status != 200 {
             anyhow::bail!("error uploading aim results");

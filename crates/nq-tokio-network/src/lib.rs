@@ -6,14 +6,13 @@ use tokio::sync::RwLock;
 use http::{Request, Response};
 use hyper::body::Incoming;
 use nq_core::{
-    oneshot_result, ConnectionManager, ConnectionTiming, ConnectionType, Network,
-    NqBody, OneshotResult, ResponseFuture, Time, Timestamp, EstablishedConnection
+    oneshot_result, ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection,
+    Network, NqBody, OneshotResult, ResponseFuture, Time, Timestamp,
 };
 
 use shellflip::{ShutdownHandle, ShutdownSignal};
 use tokio::net::TcpStream;
 use tracing::{error, info, Instrument};
-
 
 #[derive(Debug, Clone)]
 pub struct TokioNetwork {
@@ -35,13 +34,13 @@ impl Network for TokioNetwork {
 
         tokio::spawn(async move {
             match timed_lookup_host(host, time).await {
-                Ok(addrs ) => {
+                Ok(addrs) => {
                     if tx.send(Ok(addrs)).is_err() {
                         error!("Failed to send resolved addresses");
                     }
                 }
                 Err(e) => {
-                    if tx.send(Err(e.into())).is_err() {
+                    if tx.send(Err(e)).is_err() {
                         error!("Failed to send error");
                     }
                 }
@@ -106,13 +105,12 @@ impl Network for TokioNetwork {
                 info!("sending response future");
                 let _ = tx.send(Ok(response));
             }
-                .in_current_span(),
+            .in_current_span(),
         );
 
         rx
     }
 }
-
 
 #[derive(Clone)]
 pub struct TokioNetworkInner {

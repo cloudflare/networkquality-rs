@@ -5,9 +5,8 @@ use std::time::Duration;
 
 use crate::Timestamp;
 
-pub use self::map::ConnectionManager;
 pub use self::http::EstablishedConnection;
-
+pub use self::map::ConnectionManager;
 
 /// The L7 type of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

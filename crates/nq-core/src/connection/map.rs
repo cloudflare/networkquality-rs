@@ -11,7 +11,9 @@ use shellflip::ShutdownSignal;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::connection::http::{start_h1_conn, start_h2_conn, tls_connection, EstablishedConnection};
+use crate::connection::http::{
+    start_h1_conn, start_h2_conn, tls_connection, EstablishedConnection,
+};
 use crate::util::ByteStream;
 use crate::{ConnectionTiming, ConnectionType, ResponseFuture, Time};
 
@@ -23,6 +25,7 @@ pub struct ConnectionManager {
 
 impl ConnectionManager {
     /// Creates a new connection on the given io.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_connection(
         &self,
         mut timing: ConnectionTiming,

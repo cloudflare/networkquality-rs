@@ -6,7 +6,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use crate::args::rpm::RpmArgs;
 use crate::args::up_down::DownloadArgs;
 
-///
+/// mach runs multiple different network performance tests. The main focus of
+/// mach and this tool is to implement the IETF draft: "Responsiveness under
+/// Working Conditions".
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
