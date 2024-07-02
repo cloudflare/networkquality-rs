@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2024 Cloudflare, Inc.
+// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
+
 //! Defines two clients, a [`ThroughputClient`] and a normal [`Client`]. The
 //! [`ThroughputClient`] trackes the sending or receiving of body data and sends
 //! byte count updates to a listener. This is useful for determining the

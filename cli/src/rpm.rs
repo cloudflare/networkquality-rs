@@ -1,13 +1,18 @@
+// Copyright (c) 2023-2024 Cloudflare, Inc.
+// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
+
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
-use nq_core::{Network, Time, TokioTime};
+use anyhow::{bail, Context};
+use http_body_util::BodyExt;
+use nq_core::client::Client;
+use nq_core::{ConnectionType, Network, Time, TokioTime};
 use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
-use shellflip::{ShutdownCoordinator, ShutdownSignal};
+use shellflip::{ShutdownCoordinator, ShutdownHandle, ShutdownSignal};
 use tokio::time::timeout;
 use tracing::{debug, error, info};
 
@@ -148,11 +153,30 @@ pub struct RpmUrls {
 }
 
 pub async fn get_rpm_config(config_url: String) -> anyhow::Result<RpmServerConfig> {
-    tokio::task::spawn_blocking(move || {
-        ureq::get(&config_url)
-            .call()?
-            .into_json()
-            .map_err(Into::into)
-    })
-    .await?
+    let shutdown_handle = ShutdownHandle::default();
+    let time = Arc::new(TokioTime::new());
+    let network = Arc::new(TokioNetwork::new(
+        Arc::clone(&time) as Arc<dyn Time>,
+        Arc::new(shutdown_handle),
+    ));
+
+    let response = Client::default()
+        .new_connection(ConnectionType::H2)
+        .method("GET")
+        .send(
+            config_url.parse().context("parsing rpm config url")?,
+            http_body_util::Empty::new(),
+            network,
+            time,
+        )?
+        .await?;
+
+    if !response.status().is_success() {
+        bail!("could not fetch rpm config from: {config_url}");
+    }
+
+    let json = serde_json::from_slice(&response.into_body().collect().await?.to_bytes())
+        .context("parsing json config from rpm url")?;
+
+    Ok(json)
 }

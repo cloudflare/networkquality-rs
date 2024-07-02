@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2024 Cloudflare, Inc.
+// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
+
 use crate::{body::NqBody, ConnectionType, EstablishedConnection, OneshotResult, Timestamp};
 use http::Response;
 use hyper::body::Incoming;

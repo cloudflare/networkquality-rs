@@ -1,10 +1,13 @@
+// Copyright (c) 2023-2024 Cloudflare, Inc.
+// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
+
 //! Structures and utilities for reporting data to Cloudflare's AIM aggregation.
 
 use std::sync::Arc;
 
 use http::{HeaderMap, HeaderValue};
 use http_body_util::BodyExt;
-use nq_core::client::{Client, MACH_USER_AGENT};
+use nq_core::client::Client;
 use nq_core::{Time, TokioTime};
 use nq_latency::LatencyResult;
 use nq_rpm::{LoadedConnection, ResponsivenessResult};
@@ -90,10 +93,6 @@ impl CloudflareAimResults {
         ));
 
         let mut headers = HeaderMap::new();
-        headers.append(
-            "User-Agent",
-            HeaderValue::from_str(MACH_USER_AGENT).unwrap(),
-        );
         headers.append("Origin", HeaderValue::from_str(origin.as_str()).unwrap());
         headers.append("Content-Type", HeaderValue::from_static("application/json"));
         let body = serde_json::to_string(&results).unwrap();

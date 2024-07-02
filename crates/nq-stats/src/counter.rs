@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2024 Cloudflare, Inc.
+// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
+
 use nq_core::Timestamp;
 use tracing::debug;
 
@@ -28,7 +31,7 @@ impl CounterSeries {
                 self.samples.push(sample);
                 return;
             }
-      }
+        }
         let idx = self.timestamps.partition_point(|&p| p < timestamp);
 
         if idx == self.samples.len() {
@@ -49,7 +52,11 @@ impl CounterSeries {
         // by capturing the cumulative metric up to the start of the interval.
         // For example, to calculate the sum for the last 4 intervals
         // the start sample should be at the index before the `from` timestamp.
-        let start_idx = if start_idx > 0 { start_idx - 1 } else { start_idx };
+        let start_idx = if start_idx > 0 {
+            start_idx - 1
+        } else {
+            start_idx
+        };
 
         if start_idx >= end_idx || start_idx >= self.timestamps.len() {
             return None;
@@ -81,12 +88,12 @@ impl CounterSeries {
 
     pub fn interval_sum(&self, from: Timestamp, to: Timestamp) -> f64 {
         let Some(SampleRange {
-                     start: (_start_ts, start_sample),
-                     end: (_end_ts, end_sample),
-                 }) = self.sample_interval(from, to)
-            else {
-                return 0.0;
-            };
+            start: (_start_ts, start_sample),
+            end: (_end_ts, end_sample),
+        }) = self.sample_interval(from, to)
+        else {
+            return 0.0;
+        };
 
         end_sample - start_sample
     }
@@ -120,6 +127,10 @@ mod tests {
 
     use crate::{counter::CounterSeries, instant_minus_intervals};
 
+    fn avg_first_n(n: f64) -> f64 {
+        (n + 1.0) / 2.0
+    }
+
     #[test]
     fn average_simple() {
         let mut ts = CounterSeries::new();
@@ -148,11 +159,11 @@ mod tests {
         }
 
         let total_avg = ts.average().unwrap();
-        assert_eq!(total_avg, 1.0);
+        assert_eq!(total_avg, avg_first_n(10.0));
 
         let to = start + interval_length * 10 + Duration::from_millis(1);
         let from = instant_minus_intervals(to, intervals, interval_length);
         let interval_avg = ts.interval_average(from, to).unwrap();
-        assert_eq!(interval_avg, 1.0); // (10 - 6) / 4
+        assert_eq!(interval_avg, 8.5); // (10 + 9 + 8 + 7) / 4
     }
 }
