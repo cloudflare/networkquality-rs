@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "nq-core"
-version = "0.1.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "boring",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "nq-latency"
-version = "0.1.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "http",
@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "nq-rpm"
-version = "0.1.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "http",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "nq-stats"
-version = "0.1.0"
+version = "3.3.0"
 dependencies = [
  "nq-core",
  "tracing",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "nq-tokio-network"
-version = "0.1.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "http",

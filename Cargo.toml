@@ -1,8 +1,17 @@
 [workspace]
 members = ["crates/*", "cli"]
-exclude = ["crates/speedtests", "crates/io"]
 resolver = "2"
 
+[workspace.package]
+version = "3.3.0"
+repository = "https://github.com/cloudflare/foundations"
+edition = "2021"
+authors = [
+    "Fisher Darling <fisher@cloudflare.com>",
+    "Lina Baquero <lina@cloudflare.com>",
+    "Cloudflare"
+]
+license = "BSD-3-Clause"
 
 [profile.release]
 debug = 1

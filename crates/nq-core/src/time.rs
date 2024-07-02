@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2024 Cloudflare, Inc.
+// Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
+
 //! Defines a [`Time`] trait used to abstract over the different ways a
 //! timestamp can be created or a process slept. This lets us switch between
 //! tokio, system and in the future, wasi/wasm based time implementations.
