@@ -103,8 +103,10 @@ impl Responsiveness {
             direction: if download {
                 Direction::Down
             } else {
-                // 32GB should be enough per loaded connection on a 10G link (?)
-                Direction::Up(32 * 1024 * 1024 * 1024)
+                Direction::Up(std::cmp::min(
+                    32u64 * 1024 * 1024 * 1024,
+                    usize::MAX as u64
+                ) as usize)
             },
             rpm: 0.0,
             capacity: 0.0,
