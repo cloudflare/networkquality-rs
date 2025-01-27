@@ -77,7 +77,7 @@ impl CloudflareAimResults {
             up_loaded_latency_ms,
             packet_loss,
             responsiveness: download_result.rpm,
-            origin: config_url.unwrap_or_else(|| "https://speed.cloudflare.com".to_string()),
+            origin: config_url.unwrap_or_else(|| "https://rpm.speed.cloudflare.com".to_string()),
         }
     }
 
