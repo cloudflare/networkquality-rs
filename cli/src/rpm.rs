@@ -12,8 +12,8 @@ use nq_latency::LatencyConfig;
 use nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
-use shellflip::{ShutdownCoordinator, ShutdownHandle, ShutdownSignal};
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 use crate::aim_report::CloudflareAimResults;
@@ -115,24 +115,21 @@ async fn run_test(
     config: &ResponsivenessConfig,
     download: bool,
 ) -> anyhow::Result<ResponsivenessResult> {
-    let shutdown_coordinator = ShutdownCoordinator::default();
+    let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
-        shutdown_coordinator.handle(),
+        shutdown.clone().into(),
     )) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
-    let result = rpm
-        .run_test(
-            network,
-            time,
-            ShutdownSignal::from(&*shutdown_coordinator.handle()),
-        )
-        .await?;
+    let result = rpm.run_test(network, time, shutdown.clone()).await?;
 
     debug!("shutting down rpm test");
-    shutdown_coordinator.shutdown_with_timeout(1).await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
+        shutdown.cancel();
+    })
+    .await;
 
     Ok(result)
 }
@@ -153,11 +150,11 @@ pub struct RpmUrls {
 }
 
 pub async fn get_rpm_config(config_url: String) -> anyhow::Result<RpmServerConfig> {
-    let shutdown_handle = ShutdownHandle::default();
+    let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new());
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time) as Arc<dyn Time>,
-        Arc::new(shutdown_handle),
+        shutdown.clone(),
     ));
 
     let response = Client::default()

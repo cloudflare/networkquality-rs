@@ -17,7 +17,7 @@ humansize = "*"
 http = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-shellflip = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }

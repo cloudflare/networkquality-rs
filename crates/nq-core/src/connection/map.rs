@@ -10,8 +10,8 @@ use anyhow::Result;
 use http::Request;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
-use shellflip::ShutdownSignal;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::connection::http::{
@@ -37,16 +37,16 @@ impl ConnectionManager {
         conn_type: ConnectionType,
         io: Box<dyn ByteStream>,
         time: &dyn Time,
-        shutdown_signal: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> Result<Arc<RwLock<EstablishedConnection>>> {
         let connection = match conn_type {
             ConnectionType::H1 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-                start_h1_conn(domain, timing, stream, time, shutdown_signal).await?
+                start_h1_conn(domain, timing, stream, time, shutdown).await?
             }
             ConnectionType::H2 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-                start_h2_conn(remote_addr, domain, timing, stream, time, shutdown_signal).await?
+                start_h2_conn(remote_addr, domain, timing, stream, time, shutdown).await?
             }
             ConnectionType::H3 => todo!(),
         };

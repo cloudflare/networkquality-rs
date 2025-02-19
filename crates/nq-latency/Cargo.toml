@@ -15,6 +15,6 @@ nq-stats = { workspace = true }
 anyhow = { workspace = true, features = ["backtrace"] }
 http = { workspace = true }
 http-body-util = { workspace = true }
-shellflip = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
