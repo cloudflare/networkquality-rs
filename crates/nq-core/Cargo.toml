@@ -15,9 +15,10 @@ http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 pin-project-lite = { workspace = true }
-shellflip = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
+rustls-native-certs = "0.7.0"
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "test-util"] }
 tokio-boring = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
-rand = "0.9.0-alpha.1"
+rand = "0.9.0-beta.1"
 bytes = "1.6.0"

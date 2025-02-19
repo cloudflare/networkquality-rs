@@ -13,9 +13,9 @@ use nq_core::{
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
-use shellflip::ShutdownSignal;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 #[derive(Debug, Deserialize)]
@@ -57,7 +57,7 @@ impl LoadGenerator {
         conn_type: ConnectionType,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<OneshotResult<LoadedConnection>> {
         let (tx, rx) = oneshot_result();
 

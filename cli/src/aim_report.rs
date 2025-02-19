@@ -13,7 +13,7 @@ use nq_latency::LatencyResult;
 use nq_rpm::{LoadedConnection, ResponsivenessResult};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
-use shellflip::ShutdownHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use crate::util::{pretty_ms, pretty_secs_to_ms};
@@ -85,11 +85,11 @@ impl CloudflareAimResults {
         let results = self.clone();
         let origin = self.origin.clone();
 
-        let shutdown_handle = ShutdownHandle::default();
+        let shutdown = CancellationToken::new();
         let time = Arc::new(TokioTime::new());
         let network = Arc::new(TokioNetwork::new(
             Arc::clone(&time) as Arc<dyn Time>,
-            Arc::new(shutdown_handle),
+            shutdown,
         ));
 
         let mut headers = HeaderMap::new();

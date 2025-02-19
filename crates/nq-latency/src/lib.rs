@@ -9,7 +9,7 @@ use http_body_util::BodyExt;
 use nq_core::Network;
 use nq_core::{ConnectionType, Time, Timestamp};
 use nq_stats::TimeSeries;
-use shellflip::ShutdownSignal;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use url::Url;
 
@@ -49,7 +49,7 @@ impl Latency {
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        _shutdown: ShutdownSignal,
+        _shutdown: CancellationToken,
     ) -> anyhow::Result<LatencyResult> {
         self.start = time.now();
 

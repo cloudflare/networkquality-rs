@@ -1,7 +1,6 @@
 // Copyright (c) 2017-2020 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
-
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,8 +13,8 @@ use nq_core::{
     Network, NqBody, OneshotResult, ResponseFuture, Time, Timestamp,
 };
 
-use shellflip::{ShutdownHandle, ShutdownSignal};
 use tokio::net::TcpStream;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, Instrument};
 
 #[derive(Debug, Clone)]
@@ -24,7 +23,7 @@ pub struct TokioNetwork {
 }
 
 impl TokioNetwork {
-    pub fn new(time: Arc<dyn Time>, shutdown: Arc<ShutdownHandle>) -> Self {
+    pub fn new(time: Arc<dyn Time>, shutdown: CancellationToken) -> Self {
         Self {
             inner: TokioNetworkInner::new(time, shutdown),
         }
@@ -120,19 +119,19 @@ impl Network for TokioNetwork {
 pub struct TokioNetworkInner {
     connections: Arc<ConnectionManager>,
     time: Arc<dyn Time>,
-    shutdown: Arc<ShutdownHandle>,
+    shutdown: CancellationToken,
 }
 
 impl TokioNetworkInner {
-    pub fn new(time: Arc<dyn Time>, shutdown: Arc<ShutdownHandle>) -> Self {
+    pub fn new(time: Arc<dyn Time>, shutdown: CancellationToken) -> Self {
         let connections: Arc<ConnectionManager> = Default::default();
 
         tokio::spawn({
             let connections = Arc::clone(&connections);
-            let mut signal = ShutdownSignal::from(&*shutdown);
+            let cloned_shutdown = shutdown.clone();
 
             async move {
-                signal.on_shutdown().await;
+                cloned_shutdown.cancelled().await;
                 info!("shutting down connections");
                 connections.shutdown().await;
             }
@@ -168,7 +167,7 @@ impl TokioNetworkInner {
                 conn_type,
                 Box::new(tcp_stream),
                 &*self.time,
-                ShutdownSignal::from(&*self.shutdown),
+                self.shutdown.clone(),
             )
             .await?;
 

@@ -7,12 +7,14 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 
 use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
+use boring::x509::store::X509StoreBuilder;
+use boring::x509::X509;
 use http::{Request, Response};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
-use shellflip::ShutdownSignal;
 use tokio::select;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, Instrument};
 
 use crate::body::NqBody;
@@ -65,7 +67,14 @@ pub async fn tls_connection(
 ) -> anyhow::Result<TlsStream> {
     let mut builder = SslConnector::builder(SslMethod::tls_client())?;
 
-    builder.cert_store_mut().set_default_paths()?;
+    // Use platform CA certs
+    let mut store_builder = X509StoreBuilder::new()?;
+    if let Ok(ca_certs) = rustls_native_certs::load_native_certs() {
+        for root in ca_certs {
+            let _ = store_builder.add_cert(X509::from_der(&root)?);
+        }
+    }
+    builder.set_verify_cert_store(store_builder.build())?;
     builder.set_verify(SslVerifyMode::PEER);
 
     let alpn: &[u8] = match conn_type {
@@ -88,13 +97,13 @@ pub async fn tls_connection(
     Ok(ssl_stream)
 }
 
-#[tracing::instrument(skip(io, time, shutdown_signal))]
+#[tracing::instrument(skip(io, time, shutdown))]
 pub async fn start_h1_conn(
     domain: String,
     mut timing: ConnectionTiming,
     io: impl ByteStream,
     time: &dyn Time,
-    mut shutdown_signal: ShutdownSignal,
+    shutdown: CancellationToken,
 ) -> anyhow::Result<EstablishedConnection> {
     let (send_request, connection) = http1::handshake(TokioIo::new(io)).await?;
     timing.set_application(time.now());
@@ -105,7 +114,7 @@ pub async fn start_h1_conn(
                 Err(e) = connection => {
                     error!(error=%e, "error running h1 connection");
                 }
-                _ = shutdown_signal.on_shutdown() => {
+                _ = shutdown.cancelled() => {
                     debug!("shutting down h1 connection");
                 }
             }
@@ -125,14 +134,14 @@ pub async fn start_h1_conn(
     Ok(established_connection)
 }
 
-#[tracing::instrument(skip(timing, io, time, shutdown_signal))]
+#[tracing::instrument(skip(timing, io, time, shutdown))]
 pub async fn start_h2_conn(
     addr: SocketAddr,
     domain: String,
     mut timing: ConnectionTiming,
     io: impl ByteStream,
     time: &dyn Time,
-    mut shutdown_signal: ShutdownSignal,
+    shutdown: CancellationToken,
 ) -> anyhow::Result<EstablishedConnection> {
     let (dispatch, connection) = http2::handshake(TokioExecutor, TokioIo::new(io)).await?;
     timing.set_application(time.now());
@@ -145,7 +154,7 @@ pub async fn start_h2_conn(
                 Err(e) = connection => {
                     error!(error=%e, "error running h2 connection");
                 }
-                _ = shutdown_signal.on_shutdown() => {
+                _ = shutdown.cancelled() => {
                     debug!("shutting down h2 connection");
                 }
             }

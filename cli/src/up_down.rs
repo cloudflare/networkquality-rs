@@ -7,7 +7,7 @@ use anyhow::Context;
 use nq_core::client::{wait_for_finish, ThroughputClient};
 use nq_core::{ConnectionType, Network, Time, TokioTime};
 use nq_tokio_network::TokioNetwork;
-use shellflip::{ShutdownCoordinator, ShutdownSignal};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::args::up_down::{DownloadArgs, UploadArgs};
@@ -15,11 +15,11 @@ use crate::args::ConnType;
 
 /// Run a download test.
 pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
-    let shutdown_coordinator = ShutdownCoordinator::default();
+    let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
-        shutdown_coordinator.handle(),
+        shutdown.clone(),
     )) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
@@ -36,7 +36,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
             args.url.parse().context("parsing download url")?,
             Arc::clone(&network),
             Arc::clone(&time),
-            ShutdownSignal::from(&*shutdown_coordinator.handle()),
+            shutdown.clone(),
         )?
         .await?;
 
@@ -66,7 +66,10 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
         (finished_result.total * 8) as f32 / time_total.as_secs_f32()
     );
 
-    let _ = shutdown_coordinator.shutdown_with_timeout(1).await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
+        shutdown.cancel();
+    })
+    .await;
 
     Ok(())
 }
@@ -76,11 +79,11 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 // likely the best option.
 #[allow(dead_code)]
 pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
-    let shutdown_coordinator = ShutdownCoordinator::default();
+    let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
-        shutdown_coordinator.handle(),
+        shutdown.clone(),
     )) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
@@ -99,7 +102,7 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
             args.url.parse()?,
             Arc::clone(&network),
             Arc::clone(&time),
-            ShutdownSignal::from(&*shutdown_coordinator.handle()),
+            shutdown.clone(),
         )?
         .await?;
 
@@ -129,7 +132,10 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
         (finished_result.total * 8) as f32 / time_total.as_secs_f32()
     );
 
-    let _ = shutdown_coordinator.shutdown_with_timeout(1).await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
+        shutdown.cancel();
+    })
+    .await;
 
     Ok(())
 }

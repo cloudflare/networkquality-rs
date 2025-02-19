@@ -13,9 +13,9 @@ use anyhow::Context;
 use http::{HeaderMap, HeaderValue, Uri};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Incoming};
-use shellflip::ShutdownSignal;
 use tokio::select;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, Instrument};
 
 use crate::{
@@ -97,7 +97,7 @@ impl ThroughputClient {
         uri: Uri,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        mut shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<OneshotResult<InflightBody>> {
         let mut headers = self.headers.unwrap_or_default();
 
@@ -236,7 +236,7 @@ impl ThroughputClient {
                                     error!("body closing: {e}");
                                     break;
                                 },
-                                _ = shutdown.on_shutdown() => break,
+                                _ = shutdown.cancelled() => break,
                             }
                         }
                     }

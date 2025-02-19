@@ -13,12 +13,13 @@ use std::{
 };
 
 use humansize::{format_size, DECIMAL};
-use nq_core::client::{Direction, ThroughputClient};
-use nq_core::{client::wait_for_finish, Network};
-use nq_core::{ConnectionType, Time, Timestamp};
+use nq_core::{
+    client::{wait_for_finish, Direction, ThroughputClient},
+    ConnectionType, Network, Time, Timestamp,
+};
 use nq_stats::{instant_minus_intervals, TimeSeries};
-use shellflip::ShutdownSignal;
 use tokio::{select, sync::mpsc};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, Instrument};
 use url::Url;
 
@@ -103,10 +104,7 @@ impl Responsiveness {
             direction: if download {
                 Direction::Down
             } else {
-                Direction::Up(std::cmp::min(
-                    32u64 * 1024 * 1024 * 1024,
-                    usize::MAX as u64
-                ) as usize)
+                Direction::Up(std::cmp::min(32u64 * 1024 * 1024 * 1024, usize::MAX as u64) as usize)
             },
             rpm: 0.0,
             capacity: 0.0,
@@ -127,7 +125,7 @@ impl Responsiveness {
         mut self,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
-        mut shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<ResponsivenessResult> {
         let env = Env { time, network };
         self.start = env.time.now();
@@ -186,7 +184,7 @@ impl Responsiveness {
                         interval = Some(0);
                     }
                 }
-                _ = shutdown.on_shutdown() => {
+                _ = shutdown.cancelled() => {
                     debug!("shutdown requested");
                     break;
                 }
@@ -249,7 +247,7 @@ impl Responsiveness {
         interval: usize,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<bool> {
         // Determine the currently interval and round it to the interval duration.
         let end_data_interval = self.start + self.config.interval_duration * interval as u32;
@@ -405,7 +403,7 @@ impl Responsiveness {
         &self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<()> {
         let oneshot_res = self.load_generator.new_loaded_connection(
             self.direction,
@@ -442,7 +440,7 @@ impl Responsiveness {
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<()> {
         let inflight_body_fut = ThroughputClient::download()
             .new_connection(ConnectionType::H2)
@@ -504,7 +502,7 @@ impl Responsiveness {
         &mut self,
         event_tx: mpsc::Sender<Event>,
         env: &Env,
-        shutdown: ShutdownSignal,
+        shutdown: CancellationToken,
     ) -> anyhow::Result<bool> {
         // The test client should uniformly and randomly select from the active
         // load-generating connections on which to send self probes.
@@ -518,7 +516,7 @@ impl Responsiveness {
                 self.config.small_download_url.as_str().parse()?,
                 Arc::clone(&env.network),
                 Arc::clone(&env.time),
-                shutdown.clone(),
+                shutdown,
             )?;
 
         tokio::spawn(report_err(

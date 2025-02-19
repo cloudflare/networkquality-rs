@@ -7,7 +7,7 @@ use anyhow::Context;
 use nq_core::{Network, Time, TokioTime};
 use nq_latency::{Latency, LatencyConfig, LatencyResult};
 use nq_tokio_network::TokioNetwork;
-use shellflip::{ShutdownCoordinator, ShutdownSignal};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::util::pretty_secs_to_ms;
@@ -43,21 +43,15 @@ pub async fn run(url: String, runs: usize) -> anyhow::Result<()> {
 }
 
 pub async fn run_test(config: &LatencyConfig) -> anyhow::Result<LatencyResult> {
-    let shutdown_coordinator = ShutdownCoordinator::default();
+    let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
-        shutdown_coordinator.handle(),
+        shutdown.clone(),
     )) as Arc<dyn Network>;
 
     let rtt = Latency::new(config.clone());
-    let results = rtt
-        .run_test(
-            network,
-            time,
-            ShutdownSignal::from(&*shutdown_coordinator.handle()),
-        )
-        .await?;
+    let results = rtt.run_test(network, time, shutdown).await?;
 
     Ok(results)
 }
