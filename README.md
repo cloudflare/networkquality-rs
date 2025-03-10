@@ -130,7 +130,7 @@ directory. They are combined together to form the `mach` cli under `./cli`.
   throughput of an HTTP connection.
 
 - `nq-tokio-network`: a `Network` implementation based on tokio (and indirectly
-  on hyper).)
+  on hyper).
 
 - `nq-proxy-network`: a `Network` implementation that wraps another network. To
   create a new connection for users, the `ProxyNetwork` sends `CONNECT` requests
@@ -145,6 +145,9 @@ directory. They are combined together to form the `mach` cli under `./cli`.
 
 - `nq-latency`: a speedtest which measures latency by timing how long it takes
   to setup multiple TCP connections.
+
+- `nq-load-generator`: provides a `LoadGenerator` implementation used to create
+ load saturated network conditions.
 
 # TODOs
 

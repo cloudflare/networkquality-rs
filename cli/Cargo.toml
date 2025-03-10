@@ -11,6 +11,7 @@ path = "./src/main.rs"
 [dependencies]
 nq-core = { workspace = true }
 nq-latency = { workspace = true }
+nq-load-generator = { workspace = true }
 nq-rpm = { workspace = true }
 nq-tokio-network = { workspace = true }
 

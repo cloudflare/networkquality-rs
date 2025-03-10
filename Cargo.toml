@@ -22,6 +22,7 @@ nq-stats = { path = "./crates/nq-stats" }
 nq-proxy-network = { path = "./crates/nq-proxy-network" }
 nq-rpm = { path = "./crates/nq-rpm" }
 nq-latency = { path = "./crates/nq-latency" }
+nq-load-generator = { path = "./crates/nq-load-generator" }
 nq-tokio-network = { path = "./crates/nq-tokio-network" }
 
 anyhow = "1.0"
