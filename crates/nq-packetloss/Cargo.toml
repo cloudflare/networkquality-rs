@@ -1,5 +1,5 @@
 [package]
-name = "nq-rpm"
+name = "nq-packetloss"
 version = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
@@ -11,11 +11,17 @@ readme = "../README.md"
 [dependencies]
 nq-core = { workspace = true }
 nq-load-generator = { workspace = true }
-nq-stats = { workspace = true }
+nq-tokio-network = { workspace = true }
 
 anyhow = { workspace = true, features = ["backtrace"] }
-humansize = "*"
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+rustls = { version = "0.23.10", default-features = false, features = ["std", "ring"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
+webrtc = { workspace = true }

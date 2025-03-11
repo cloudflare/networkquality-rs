@@ -1,5 +1,5 @@
 [package]
-name = "nq-rpm"
+name = "nq-load-generator"
 version = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
@@ -10,11 +10,12 @@ readme = "../README.md"
 
 [dependencies]
 nq-core = { workspace = true }
-nq-load-generator = { workspace = true }
 nq-stats = { workspace = true }
 
 anyhow = { workspace = true, features = ["backtrace"] }
-humansize = "*"
+http = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

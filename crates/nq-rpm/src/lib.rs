@@ -1,8 +1,6 @@
 // Copyright (c) 2023-2024 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
-mod load_generator;
-
 use std::{
     collections::HashMap,
     fmt::{Debug, Display},
@@ -17,14 +15,12 @@ use nq_core::{
     client::{wait_for_finish, Direction, ThroughputClient},
     ConnectionType, Network, Time, Timestamp,
 };
+use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_stats::{instant_minus_intervals, TimeSeries};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, Instrument};
 use url::Url;
-
-pub use crate::load_generator::LoadedConnection;
-use crate::load_generator::{LoadConfig, LoadGenerator};
 
 #[derive(Debug, Clone)]
 pub struct ResponsivenessConfig {

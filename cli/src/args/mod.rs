@@ -1,10 +1,12 @@
 // Copyright (c) 2023-2024 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
+pub(crate) mod packet_loss;
 pub(crate) mod rpm;
 pub(crate) mod up_down;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use packet_loss::PacketLossArgs;
 
 use crate::args::rpm::RpmArgs;
 use crate::args::up_down::DownloadArgs;
@@ -53,6 +55,8 @@ pub enum Command {
         #[clap(short, long)]
         runs: usize,
     },
+    /// Send UDP packets to a TURN server, reporting lost packets.
+    PacketLoss(PacketLossArgs),
 }
 
 // todo(fisher): figure out proxy chaining. Preparsing args or using the -- sentinal?

@@ -4,6 +4,7 @@
 mod aim_report;
 pub(crate) mod args;
 mod latency;
+mod packet_loss;
 mod report;
 mod rpm;
 mod up_down;
@@ -31,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Download(config) => up_down::download(config).await?,
         // Command::Upload(config) => up_down::upload(config).await?,
         Command::Rtt { url, runs } => latency::run(url, runs).await?,
+        Command::PacketLoss(config) => packet_loss::run(config).await?,
     }
 
     Ok(())

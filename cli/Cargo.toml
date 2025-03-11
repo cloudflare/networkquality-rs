@@ -11,6 +11,8 @@ path = "./src/main.rs"
 [dependencies]
 nq-core = { workspace = true }
 nq-latency = { workspace = true }
+nq-load-generator = { workspace = true }
+nq-packetloss = { workspace = true }
 nq-rpm = { workspace = true }
 nq-tokio-network = { workspace = true }
 
@@ -19,6 +21,7 @@ clap = { workspace = true, features = ["derive"] }
 clap-verbosity-flag = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
+hyper = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "macros",] }
