@@ -19,6 +19,7 @@ debug = 1
 [workspace.dependencies]
 nq-core = { path = "./crates/nq-core" }
 nq-stats = { path = "./crates/nq-stats" }
+nq-packetloss = { path = "./crates/nq-packetloss" }
 nq-proxy-network = { path = "./crates/nq-proxy-network" }
 nq-rpm = { path = "./crates/nq-rpm" }
 nq-latency = { path = "./crates/nq-latency" }

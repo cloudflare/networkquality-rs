@@ -28,7 +28,7 @@ pub struct CloudflareAimResults {
     pub(crate) upload: Vec<BpsMeasurement>,
     pub(crate) down_loaded_latency_ms: Vec<f64>,
     pub(crate) up_loaded_latency_ms: Vec<f64>,
-    pub(crate) packet_loss: PacketLoss,
+    pub(crate) packet_loss: PacketLossMeasurement,
     pub(crate) responsiveness: f64,
     #[serde(skip)]
     origin: String,
@@ -65,7 +65,7 @@ impl CloudflareAimResults {
             .map(pretty_ms)
             .collect();
 
-        let packet_loss = PacketLoss {
+        let packet_loss = PacketLossMeasurement {
             num_messages: 0,
             loss_ratio: 0.0,
         };
@@ -170,14 +170,14 @@ impl BpsMeasurement {
 /// A measure of packet loss.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PacketLoss {
+pub struct PacketLossMeasurement {
     num_messages: usize,
     loss_ratio: f64,
 }
 
 /// Default to 0% packet loss
 // todo(fisher): add network statistics as a part of the `Network` trait.
-impl Default for PacketLoss {
+impl Default for PacketLossMeasurement {
     fn default() -> Self {
         Self {
             num_messages: 1000,
