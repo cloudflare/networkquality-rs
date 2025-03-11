@@ -24,14 +24,14 @@ pub struct PacketLossArgs {
     #[clap(default_value = "10")]
     #[clap(short = 's', long)]
     pub batch_size: usize,
-    /// Time to wait between batch sends
+    /// Time to wait between batch sends in milliseconds (ms).
     #[clap(default_value = "10")]
     #[clap(short = 'w', long)]
-    pub batch_wait_time: u64,
-    /// Time to wait for receiving messages after all messages have been sent
+    pub batch_wait_time_ms: u64,
+    /// Time to wait for receiving messages after all messages have been sent in milliseconds (ms).
     #[clap(default_value = "3000")]
     #[clap(short = 'r', long)]
-    pub response_wait_time: u64,
+    pub response_wait_time_ms: u64,
 
     /// The large file endpoint which should be multiple GBs.
     #[clap(

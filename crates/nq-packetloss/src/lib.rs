@@ -86,8 +86,7 @@ pub struct PacketLoss {
 impl PacketLoss {
     pub fn new_with_config(config: PacketLossConfig) -> anyhow::Result<Self> {
         let load_generator = LoadGenerator::new(config.load_config())?;
-        let mut message_vec = Vec::new();
-        message_vec.resize(config.num_packets, false);
+        let message_vec = vec![false; config.num_packets];
         let message_tracker: Arc<RwLock<Vec<bool>>> = Arc::new(RwLock::new(message_vec));
         Ok(Self {
             config: Arc::new(config),

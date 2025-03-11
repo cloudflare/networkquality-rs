@@ -22,8 +22,8 @@ pub async fn run(args: PacketLossArgs) -> anyhow::Result<()> {
         turn_cred_request_url: args.turn_cred_url.parse()?,
         num_packets: args.num_packets,
         batch_size: args.batch_size,
-        batch_wait_time: Duration::from_millis(args.batch_wait_time),
-        response_wait_time: Duration::from_millis(args.response_wait_time),
+        batch_wait_time: Duration::from_millis(args.batch_wait_time_ms),
+        response_wait_time: Duration::from_millis(args.response_wait_time_ms),
         download_url: args.download_url.parse()?,
         upload_url: args.upload_url.parse()?,
     };
