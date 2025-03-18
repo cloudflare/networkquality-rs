@@ -37,14 +37,14 @@ pub struct PacketLossArgs {
     #[clap(
         short = 'd',
         long = "download",
-        default_value = "https://aim.cloudflare.com/responsiveness/api/v1/large"
+        default_value = "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
     )]
     pub download_url: String,
     /// The upload url which accepts an arbitrary amount of data.
     #[clap(
         short = 'u',
         long = "upload",
-        default_value = "https://aim.cloudflare.com/responsiveness/api/v1/upload"
+        default_value = "https://h3.speed.cloudflare.com/__up"
     )]
     pub upload_url: String,
 }

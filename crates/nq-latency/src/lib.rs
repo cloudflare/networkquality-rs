@@ -22,7 +22,7 @@ pub struct LatencyConfig {
 impl Default for LatencyConfig {
     fn default() -> Self {
         Self {
-            url: "https://aim.cloudflare.com/responsiveness/api/v1/small"
+            url: "https://h3.speed.cloudflare.com/__down?bytes=10"
                 .parse()
                 .unwrap(),
             runs: 20,

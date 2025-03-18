@@ -25,21 +25,21 @@ pub struct RpmArgs {
     #[clap(
         short = 'l',
         long = "large",
-        default_value = "https://aim.cloudflare.com/responsiveness/api/v1/large"
+        default_value = "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
     )]
     pub large_download_url: String,
     /// The small file endpoint which should be very small, only a few bytes.
     #[clap(
         short = 's',
         long = "small",
-        default_value = "https://aim.cloudflare.com/cdn-cgi/build/nginx-ssl"
+        default_value = "https://h3.speed.cloudflare.com/__down?bytes=10"
     )]
     pub small_download_url: String,
     /// The upload url which accepts an arbitrary amount of data.
     #[clap(
         short = 'u',
         long = "upload",
-        default_value = "https://aim.cloudflare.com/responsiveness/api/v1/upload"
+        default_value = "https://h3.speed.cloudflare.com/__up"
     )]
     pub upload_url: String,
     /// The number of intervals to use when calculating the moving average.
@@ -75,10 +75,10 @@ impl Default for RpmArgs {
     fn default() -> Self {
         Self {
             config: None,
-            large_download_url: "https://aim.cloudflare.com/responsiveness/api/v1/large"
+            large_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .to_string(),
-            small_download_url: "https://aim.cloudflare.com/cdn-cgi/build/nginx-ssl".to_string(),
-            upload_url: "https://aim.cloudflare.com/responsiveness/api/v1/upload".to_string(),
+            small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10".to_string(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".to_string(),
             moving_average_distance: 4,
             std_tolerance: 0.05,
             trimmed_mean_percent: 0.95,
