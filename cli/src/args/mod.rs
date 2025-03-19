@@ -47,7 +47,7 @@ pub enum Command {
     Rtt {
         /// The URL to perform a GET request against. The full GET time is not
         /// measured, just the TCP handshake.
-        #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/small")]
+        #[clap(default_value = "https://h3.speed.cloudflare.com/__down?bytes=10")]
         #[clap(short, long)]
         url: String,
         /// How many measurements to perform.

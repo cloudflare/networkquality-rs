@@ -52,10 +52,10 @@ impl Default for PacketLossConfig {
             batch_size: 10,
             batch_wait_time: Duration::from_millis(10),
             response_wait_time: Duration::from_millis(3000),
-            download_url: "https://aim.cloudflare.com/responsiveness/api/v1/large"
+            download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://aim.cloudflare.com/responsiveness/api/v1/upload"
+            upload_url: "https://h3.speed.cloudflare.com/__up"
                 .parse()
                 .unwrap(),
         }
@@ -350,10 +350,10 @@ mod tests {
             batch_size,
             batch_wait_time: Duration::from_millis(batch_wait_time),
             response_wait_time: Duration::from_millis(response_wait_time),
-            download_url: "https://aim.cloudflare.com/responsiveness/api/v1/large"
+            download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://aim.cloudflare.com/responsiveness/api/v1/upload"
+            upload_url: "https://h3.speed.cloudflare.com/__up"
                 .parse()
                 .unwrap(),
         };
@@ -458,10 +458,10 @@ mod tests {
             batch_size: 10,
             batch_wait_time: Duration::from_millis(25),
             response_wait_time: Duration::from_millis(100),
-            download_url: "https://aim.cloudflare.com/responsiveness/api/v1/large"
+            download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://aim.cloudflare.com/responsiveness/api/v1/upload"
+            upload_url: "https://h3.speed.cloudflare.com/__up"
                 .parse()
                 .unwrap(),
         };

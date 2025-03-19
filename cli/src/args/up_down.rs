@@ -12,7 +12,7 @@ use crate::args::ConnType;
 #[derive(Debug, Args)]
 pub struct DownloadArgs {
     /// The URL to download data from.
-    #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/small")]
+    #[clap(default_value = "https://h3.speed.cloudflare.com/__down?bytes=10")]
     pub(crate) url: String,
     #[clap(default_value = "h2")]
     pub(crate) conn_type: ConnType,
@@ -25,7 +25,7 @@ pub struct DownloadArgs {
 #[derive(Debug, Args)]
 pub struct UploadArgs {
     /// The URL to upload data to.
-    #[clap(default_value = "https://aim.cloudflare.com/responsiveness/api/v1/upload")]
+    #[clap(default_value = "https://h3.speed.cloudflare.com/__up")]
     pub(crate) url: String,
     /// The type of the connection.
     #[clap(default_value = "h2")]

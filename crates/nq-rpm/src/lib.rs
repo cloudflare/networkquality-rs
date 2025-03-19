@@ -49,13 +49,13 @@ impl ResponsivenessConfig {
 impl Default for ResponsivenessConfig {
     fn default() -> Self {
         Self {
-            large_download_url: "https://aim.cloudflare.com/responsiveness/api/v1/large"
+            large_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            small_download_url: "https://aim.cloudflare.com/cdn-cgi/build/nginx-ssl"
+            small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10"
                 .parse()
                 .unwrap(),
-            upload_url: "https://aim.cloudflare.com/responsiveness/api/v1/upload"
+            upload_url: "https://h3.speed.cloudflare.com/__up"
                 .parse()
                 .unwrap(),
             moving_average_distance: 4,
