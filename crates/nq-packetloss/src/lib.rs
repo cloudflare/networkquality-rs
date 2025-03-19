@@ -16,7 +16,7 @@ use nq_core::{
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
-use std::{cmp::min, collections::HashMap, sync::Arc, time::Duration};
+use std::{cmp::min, collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -308,9 +308,19 @@ impl PacketLoss {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PacketLossResult {
     /// Number of messages received during test
-    num_messages: usize,
+    pub num_messages: usize,
     /// Calculated ratio based on expected returned messages and actual
-    loss_ratio: f64,
+    pub loss_ratio: f64,
+}
+
+impl Display for PacketLossResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "messages: {} loss ratio: {:.2}",
+            self.num_messages, self.loss_ratio,
+        )
+    }
 }
 
 pub enum PacketLossEvent {
