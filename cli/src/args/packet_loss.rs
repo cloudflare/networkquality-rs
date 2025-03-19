@@ -8,12 +8,10 @@ use clap::Args;
 /// Send UDP packets to a TURN server, reporting lost packets.
 #[derive(Debug, Args)]
 pub struct PacketLossArgs {
-    /// The target TURN server URI to send UDP packets
-    #[clap(default_value = "turn:turn.speed.cloudflare.com:50000?transport=udp")]
+    /// The target TURN server URI to send UDP packets. User's will have to provide a TURN server.
     #[clap(short = 't', long)]
     pub turn_uri: String,
     /// The URL to send the request to for TURN server credentials
-    #[clap(default_value = "https://speed.cloudflare.com/turn-creds")]
     #[clap(short = 'c', long)]
     pub turn_cred_url: String,
     /// Total number of messages/packets to send
@@ -33,14 +31,14 @@ pub struct PacketLossArgs {
     #[clap(short = 'r', long)]
     pub response_wait_time_ms: u64,
 
-    /// The large file endpoint which should be multiple GBs.
+    /// The download file endpoint used for load generation which should be multiple GBs.
     #[clap(
         short = 'd',
         long = "download",
         default_value = "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
     )]
     pub download_url: String,
-    /// The upload url which accepts an arbitrary amount of data.
+    /// The upload url used for load generation which accepts an arbitrary amount of data.
     #[clap(
         short = 'u',
         long = "upload",
