@@ -45,8 +45,12 @@ fn setup_logging(verbosity: clap_verbosity_flag::Verbosity) -> anyhow::Result<()
         match verbosity.log_level_filter() {
             LevelFilter::Off => "error",
             LevelFilter::Error => "mach=info,error",
-            LevelFilter::Warn => "mach=info,nq_rpm=info,nq_latency=info,nq_core=error",
-            LevelFilter::Info => "mach=info,nq_rpm=info,nq_latency=info,nq_core=info",
+            LevelFilter::Warn => {
+                "mach=info,nq_rpm=info,nq_latency=info,nq_core=error,nq_packetloss=info"
+            }
+            LevelFilter::Info => {
+                "mach=info,nq_rpm=info,nq_latency=info,nq_core=info,nq_packetloss=info"
+            }
             LevelFilter::Debug => "debug",
             LevelFilter::Trace => "trace",
         }

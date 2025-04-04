@@ -1,18 +1,16 @@
 // Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
-//! This crate is a Rust implementation the Packet Loss measurement as performed by the javascript project
-//! at https://github.com/cloudflare/speedtest.
+//! This crate is a Rust implementation the Packet Loss measurement modeled after the test performed by the
+//! javascript project at <https://github.com/cloudflare/speedtest>.
 //!
-//! As stated by that project, Packet loss is measured by submitting a set of UDP packets to a WebRTC TURN server
-//! in a round-trip fashion, and determining how many packets do not arrive.
+//! Packet loss is measured by submitting a set of UDP packets to a TURN server in a round-trip fashion, and determining
+//! how many packets do not arrive back from the server.
 
-mod webrtc_data_channel;
+mod data_channel;
 
-use nq_core::{
-    client::Direction,
-    ConnectionType, Network, Time, TokioTime,
-};
+use data_channel::{DataChannelEvent, TurnDataChannel};
+use nq_core::{client::Direction, ConnectionType, Network, Time, TokioTime};
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
@@ -21,14 +19,13 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use url::Url;
-use webrtc_data_channel::{DataChannelEvent, WebRTCDataChannel};
 
 #[derive(Clone, Debug)]
 pub struct PacketLossConfig {
-    /// The target TURN server URI to send UDP packets
-    pub turn_server_uri: String,
+    /// The target TURN server HOST:PORT to send UDP packets
+    pub turn_server_host_with_port: Option<String>,
     /// The URL to send the request to for TURN server credentials
-    pub turn_cred_request_url: Url,
+    pub turn_cred_request_url: Option<Url>,
     /// Total number of messages/packets to send
     pub num_packets: usize,
     /// Total number of messages to send in a batch before waiting
@@ -41,13 +38,15 @@ pub struct PacketLossConfig {
     pub download_url: Url,
     /// Upload URL to use for for the [`LoadGenerator`]
     pub upload_url: Url,
+    /// Enable/disable network load generation during test
+    pub disable_network_loading: bool,
 }
 
 impl Default for PacketLossConfig {
     fn default() -> Self {
         Self {
-            turn_server_uri: "turn:turn.speed.cloudflare.com:50000?transport=udp".to_owned(),
-            turn_cred_request_url: "https://speed.cloudflare.com/turn-creds".parse().unwrap(),
+            turn_server_host_with_port: None,
+            turn_cred_request_url: None,
             num_packets: 1000,
             batch_size: 10,
             batch_wait_time: Duration::from_millis(10),
@@ -55,9 +54,8 @@ impl Default for PacketLossConfig {
             download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            disable_network_loading: false,
         }
     }
 }
@@ -73,10 +71,11 @@ impl PacketLossConfig {
     }
 }
 
-/// A [`PacketLoss`] is a test harness around a WebRTC connection that sends UDP packets to a
-/// TURN server and count the returned packets to calculate loss ratio.
+/// A [`PacketLoss`] is a test harness around a TURN client connection that sends STUN/UDP packets to a
+/// TURN server and counts the returned packets to calculate loss ratio.
 pub struct PacketLoss {
     config: Arc<PacketLossConfig>,
+    /// Generate network traffic to simulate a saturated network environment
     load_generator: LoadGenerator,
     /// Used to track the messages received
     /// A sent message is stored as false until a response is received setting it to true
@@ -95,7 +94,7 @@ impl PacketLoss {
         })
     }
 
-    // Bi-directional load generators
+    /// Bi-directional load generators
     fn add_load_generators(
         &self,
         packet_event_tx: mpsc::Sender<PacketLossEvent>,
@@ -127,50 +126,70 @@ impl PacketLoss {
     pub async fn run_test(
         mut self,
         turn_server_creds: TurnServerCreds,
+        network: Arc<dyn Network>,
         shutdown: CancellationToken,
     ) -> anyhow::Result<PacketLossResult> {
-        let (webrtc_event_tx, mut webrtc_event_rx) =
-            tokio::sync::mpsc::unbounded_channel::<DataChannelEvent>();
         let (packet_event_tx, mut packet_event_rx) =
             tokio::sync::mpsc::channel::<PacketLossEvent>(3);
 
-        #[cfg(not(test))]
-        self.add_load_generators(packet_event_tx.clone(), shutdown.clone())?;
-
-        let mut webrtc_data_channel = WebRTCDataChannel::create_with_config(
-            &self.config.turn_server_uri,
+        let turn_server_host_with_port = self
+            .config
+            .turn_server_host_with_port
+            .clone()
+            .ok_or_else(|| {
+                anyhow::anyhow!("Missing TURN server and credential url config settings")
+            })?;
+        let mut data_channel = TurnDataChannel::create_with_config(
+            &turn_server_host_with_port,
             &turn_server_creds,
-            webrtc_event_tx.clone(),
+            network,
         )
         .await?;
 
-        // Establishing the data channel starts the flow of messages to the TURN server
-        webrtc_data_channel.establish_data_channel().await?;
+        if !self.config.disable_network_loading {
+            self.add_load_generators(packet_event_tx.clone(), shutdown.clone())?;
+        }
 
+        let mut turn_channel_opened = false;
         loop {
             tokio::select! {
-                Some(event) = webrtc_event_rx.recv() => {
-                    match event {
-                        // Received when the WebRTC data channel has been established. Inidicates the data channel is ready for traffic
-                        DataChannelEvent::OnOpenChannel => {
-                            self.send_messages(webrtc_data_channel.clone(), packet_event_tx.clone(), shutdown.clone());
-                        }
+                turn_client = data_channel.wait_for_message() => match turn_client {
+                    Ok(event) => {
+                        // Any event from the TURN server is considered contacted
+                        match event {
 
-                        // Each message that is received on the data channel is notified and handled here
-                        DataChannelEvent::OnReceivedMessage(message) => {
-                            self.message_tracker
-                                .write()
-                                .await
-                                .insert(message, true);
-                        }
+                            // Communication with the TURN server has been established and sending packets can begin
+                            DataChannelEvent::OnOpenChannel => {
+                                turn_channel_opened = true;
+                                self.send_messages(packet_event_tx.clone(), shutdown.clone());
+                            }
 
-                        // A failure occured during setup of the data channel
-                        DataChannelEvent::ConnectionError(err) => {
-                            tracing::warn!("Failed to complete packet loss test {}", err);
-                            break;
+                            // A data response has been received, expected to be the echoed message number
+                            DataChannelEvent::OnReceivedMessage(message_num) => {
+                                if message_num >= self.config.num_packets {
+                                    tracing::warn!("Unexpected message number");
+                                    break;
+                                }
+                                self.message_tracker
+                                    .write()
+                                    .await
+                                    .insert(message_num, true);
+                            }
+
+                            // The wait_for_message will send info messages when it receives a non-data message
+                            DataChannelEvent::OnInfoMessage(info) => tracing::trace!("{}", info),
+
+                            DataChannelEvent::ConnectionError(err) => {
+                                tracing::warn!("Failed to complete packet loss test {}", err);
+                                break;
+                            }
                         }
                     }
-                }
+                    Err(err) => {
+                            tracing::warn!("Failed to complete packet loss test {}", err);
+                            break;
+                    }
+                },
 
                 Some(event) = packet_event_rx.recv() => {
                     match event {
@@ -184,11 +203,25 @@ impl PacketLoss {
                             self.load_generator.push(connection);
                         }
 
-                        // Failed to create a load generator
+                        // Send the numbered message
+                        PacketLossEvent::SendMessage(message_num) => {
+                            data_channel.send_message(message_num).await?;
+                        }
+
+                        // Test failure, ex. failed to create a load generator
                         PacketLossEvent::Error(err) => {
                             tracing::warn!("Failed to complete packet loss test {}", err);
                             break;
                         }
+                    }
+                }
+
+                // Timeout to handle the case the TURN server fails to respond at some point before the
+                // channel is established.
+                () = tokio::time::sleep(Duration::from_secs(5)) => {
+                    if !turn_channel_opened {
+                        tracing::warn!("Test timed out waiting for TURN server to respond");
+                        break;
                     }
                 }
 
@@ -203,7 +236,7 @@ impl PacketLoss {
         let mut loads = self.load_generator.into_connections();
         loads.iter_mut().for_each(|load| load.stop());
 
-        webrtc_data_channel.close_channel().await;
+        data_channel.close_connection().await?;
 
         // Only count the messages if they are flagged as true (i.e. received)
         let num_messages = self
@@ -227,7 +260,6 @@ impl PacketLoss {
     /// Write messages to the data channel of an incrementing sequence of numbers used to identify unique messages/packets.
     fn send_messages(
         &self,
-        mut webrtc_data_channel: WebRTCDataChannel,
         send_message_tx: mpsc::Sender<PacketLossEvent>,
         shutdown: CancellationToken,
     ) {
@@ -236,15 +268,14 @@ impl PacketLoss {
             let mut message_count = 0;
             loop {
                 let batch_start = message_count;
-                let batch_count = if config.batch_size == 0 {
+                let batch_end = if config.batch_size == 0 {
                     config.num_packets
                 } else {
                     min(message_count + config.batch_size, config.num_packets)
                 };
                 // Send messages in batches of a configured size
-                for i in batch_start..batch_count {
-                    // Send the message to the TURN server
-                    if let Err(err) = webrtc_data_channel.send_message(&i.to_be_bytes()).await {
+                for i in batch_start..batch_end {
+                    if let Err(err) = send_message_tx.send(PacketLossEvent::SendMessage(i)).await {
                         tracing::warn!("Send message failed: {}", err);
                     }
                     message_count += 1;
@@ -325,6 +356,7 @@ impl Display for PacketLossResult {
 
 pub enum PacketLossEvent {
     AllMessagesSent,
+    SendMessage(usize),
     NewLoadedConnection(LoadedConnection),
     Error(anyhow::Error),
 }
@@ -338,11 +370,15 @@ pub struct TurnServerCreds {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        webrtc_data_channel::tests::TestTurnServer, PacketLoss, PacketLossConfig, PacketLossResult,
-    };
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
+
+    use nq_core::{Time, TokioTime};
+    use nq_tokio_network::TokioNetwork;
     use tokio_util::sync::CancellationToken;
+
+    use crate::{
+        data_channel::tests::TestTurnServer, PacketLoss, PacketLossConfig, PacketLossResult,
+    };
 
     async fn run_test(
         num_packets: usize,
@@ -351,25 +387,27 @@ mod tests {
         response_wait_time: u64,
     ) -> anyhow::Result<PacketLossResult> {
         let shutdown = CancellationToken::new();
+        let time = Arc::new(TokioTime::new());
+        let network = Arc::new(TokioNetwork::new(
+            Arc::clone(&time) as Arc<dyn Time>,
+            shutdown.clone(),
+        ));
         let server = TestTurnServer::start_turn_server().await?;
 
         let config = PacketLossConfig {
-            turn_server_uri: format!("turn:127.0.0.1:{}?transport=udp", server.server_port),
-            turn_cred_request_url: "https://127.0.0.1/creds".parse().unwrap(),
+            turn_server_host_with_port: Some(format!("127.0.0.1:{}", server.server_port)),
+            turn_cred_request_url: Some("https://127.0.0.1/creds".parse().unwrap()),
             num_packets,
             batch_size,
             batch_wait_time: Duration::from_millis(batch_wait_time),
             response_wait_time: Duration::from_millis(response_wait_time),
-            download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
-                .parse()
-                .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            download_url: "https://127.0.0.10".parse().unwrap(),
+            upload_url: "https://127.0.0.1".parse().unwrap(),
+            disable_network_loading: true,
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
         let packet_loss_result = packet_loss
-            .run_test(server.get_test_creds(), shutdown)
+            .run_test(server.get_test_creds(), network, shutdown)
             .await;
         server.close().await?;
         packet_loss_result
@@ -393,11 +431,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_batch_size() -> anyhow::Result<()> {
+        let test_message_count = 1000;
         // Test with zero batch size which results in one big batch
-        let packet_loss_result = run_test(1000, 0, 10, 100).await?;
+        let packet_loss_result = run_test(test_message_count, 0, 10, 100).await?;
         assert_eq!(
             PacketLossResult {
-                num_messages: 1000,
+                num_messages: test_message_count,
                 loss_ratio: 0.0,
             },
             packet_loss_result
@@ -458,22 +497,24 @@ mod tests {
     #[tokio::test]
     async fn test_cancel() -> anyhow::Result<()> {
         let shutdown = CancellationToken::new();
+        let time = Arc::new(TokioTime::new());
+        let network = Arc::new(TokioNetwork::new(
+            Arc::clone(&time) as Arc<dyn Time>,
+            shutdown.clone(),
+        ));
         let server = TestTurnServer::start_turn_server().await?;
 
         // Configure a large enough batch with enough batch wait to allow the test runs a bit longer
         let config = PacketLossConfig {
-            turn_server_uri: format!("turn:127.0.0.1:{}?transport=udp", server.server_port),
-            turn_cred_request_url: "https://127.0.0.1/creds".parse().unwrap(),
+            turn_server_host_with_port: Some(format!("127.0.0.1:{}", server.server_port)),
+            turn_cred_request_url: Some("https://127.0.0.1/creds".parse().unwrap()),
             num_packets: 5000,
             batch_size: 10,
             batch_wait_time: Duration::from_millis(25),
             response_wait_time: Duration::from_millis(100),
-            download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
-                .parse()
-                .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            download_url: "https://127.0.0.1".parse().unwrap(),
+            upload_url: "https://127.0.0.1".parse().unwrap(),
+            disable_network_loading: true,
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
 
@@ -486,7 +527,7 @@ mod tests {
 
         // Start the loss test
         let packet_loss_result = packet_loss
-            .run_test(server.get_test_creds(), shutdown)
+            .run_test(server.get_test_creds(), network, shutdown)
             .await;
         server.close().await?;
         let packet_loss_result = packet_loss_result?;

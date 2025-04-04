@@ -17,10 +17,8 @@ use crate::args::ConnType;
 pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
         ConnType::H1 => ConnectionType::H1,
@@ -81,10 +79,8 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
         ConnType::H1 => ConnectionType::H1, // ConnectionType::H1,

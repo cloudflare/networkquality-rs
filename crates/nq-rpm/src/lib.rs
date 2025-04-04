@@ -55,9 +55,7 @@ impl Default for ResponsivenessConfig {
             small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
             moving_average_distance: 4,
             interval_duration: Duration::from_millis(1000),
             test_duration: Duration::from_secs(20),

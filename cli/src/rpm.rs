@@ -117,10 +117,8 @@ async fn run_test(
 ) -> anyhow::Result<ResponsivenessResult> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone().into(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
     let result = rpm.run_test(network, time, shutdown.clone()).await?;

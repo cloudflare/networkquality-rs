@@ -14,6 +14,8 @@ nq-load-generator = { workspace = true }
 nq-tokio-network = { workspace = true }
 
 anyhow = { workspace = true, features = ["backtrace"] }
+futures = { workspace = true }
+bytes = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
@@ -24,4 +26,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
+turnclient = { workspace = true }
+
+[dev-dependencies]
 webrtc = { workspace = true }
