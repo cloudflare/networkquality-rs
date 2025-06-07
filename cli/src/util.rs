@@ -10,3 +10,8 @@ pub fn pretty_secs_to_ms(secs: f64) -> f64 {
 pub fn pretty_ms(ms: f64) -> f64 {
     (ms * 1_000.0).trunc() / 1_000.0
 }
+
+/// Round f64 seconds to 3 decimals.
+pub fn pretty_secs(secs: f64) -> f64 {
+    (secs * 1_000.0).trunc() / 1_000.0
+}
