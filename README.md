@@ -78,13 +78,15 @@ Timing the download of a resource:
 
 ```shell
 mach download https://cloudflare.com/cdn-cgi/trace
- time_lookup: 0.0000
-time_connect: 0.0531
- time_secure: 0.1144
-    duration: 0.2224
-
-         bps: 8130.7393
- bytes_total: 226
+{
+  "dns_time": 0.0,
+  "time_connect": 0.078,
+  "time_secure": 0.243,
+  "time_body": 0.0,
+  "time_total": 0.243,
+  "bytes_total": 228,
+  "throughput": 7476
+}
 ```
 
 Measuring latency using TCP connection timing:
