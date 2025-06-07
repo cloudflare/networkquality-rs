@@ -12,15 +12,16 @@ use tracing::info;
 
 use crate::args::up_down::{DownloadArgs, UploadArgs};
 use crate::args::ConnType;
+use crate::util::pretty_secs;
+
+use serde_json::json;
 
 /// Run a download test.
 pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
         ConnType::H1 => ConnectionType::H1,
@@ -48,23 +49,28 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let finished_result = wait_for_finish(inflight_body.events).await?;
     let finished = time.now();
 
-    let time_body = finished.duration_since(body_start);
-    let time_total = timing.time_secure() + time_body;
+    let time_body_raw = finished.duration_since(body_start);
+    let time_total_raw = timing.time_secure() + time_body_raw;
 
-    println!(" dns_time: {:.4}", timing.dns_time().as_secs_f32());
-    println!("time_connect: {:.4}", timing.time_connect().as_secs_f32());
-    println!(" time_secure: {:.4}", timing.time_secure().as_secs_f32());
-    println!(
-        "   time_body: {:.4}",
-        finished.duration_since(body_start).as_secs_f32()
-    );
-    println!("  time_total: {:.4}", time_total.as_secs_f32());
-    println!();
-    println!(" bytes_total: {}", finished_result.total);
-    println!(
-        "         bps: {:.4}",
-        (finished_result.total * 8) as f32 / time_total.as_secs_f32()
-    );
+    let dns_time = pretty_secs(timing.dns_time().as_secs_f64());
+    let time_connect = pretty_secs(timing.time_connect().as_secs_f64());
+    let time_secure = pretty_secs(timing.time_secure().as_secs_f64());
+    let time_body = pretty_secs(time_body_raw.as_secs_f64());
+    let time_total = pretty_secs(time_total_raw.as_secs_f64());
+    let bytes_total = finished_result.total;
+    let throughput = ((finished_result.total as f64 * 8.0) / time_total_raw.as_secs_f64()) as u64;
+
+    let json = json!({
+        "dns_time":     dns_time,
+        "time_connect": time_connect,
+        "time_secure":  time_secure,
+        "time_body":    time_body,
+        "time_total":   time_total,
+        "bytes_total":  bytes_total,
+        "throughput":   throughput,
+    });
+
+    println!("{:#}", json);
 
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
         shutdown.cancel();
@@ -81,10 +87,8 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let conn_type = match args.conn_type {
         ConnType::H1 => ConnectionType::H1, // ConnectionType::H1,
@@ -114,23 +118,28 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let finished_result = wait_for_finish(inflight_body.events).await?;
     let finished = time.now();
 
-    let time_body = finished.duration_since(body_start);
-    let time_total = timing.time_secure() + time_body;
+    let time_body_raw = finished.duration_since(body_start);
+    let time_total_raw = timing.time_secure() + time_body_raw;
 
-    println!(" dns_time: {:.4}", timing.dns_time().as_secs_f32());
-    println!("time_connect: {:.4}", timing.time_connect().as_secs_f32());
-    println!(" time_secure: {:.4}", timing.time_secure().as_secs_f32());
-    println!(
-        "   time_body: {:.4}",
-        finished.duration_since(body_start).as_secs_f32()
-    );
-    println!("  time_total: {:.4}", time_total.as_secs_f32());
-    println!();
-    println!(" bytes_total: {}", finished_result.total);
-    println!(
-        "         bps: {:.4}",
-        (finished_result.total * 8) as f32 / time_total.as_secs_f32()
-    );
+    let dns_time = pretty_secs(timing.dns_time().as_secs_f64());
+    let time_connect = pretty_secs(timing.time_connect().as_secs_f64());
+    let time_secure = pretty_secs(timing.time_secure().as_secs_f64());
+    let time_body = pretty_secs(time_body_raw.as_secs_f64());
+    let time_total = pretty_secs(time_total_raw.as_secs_f64());
+    let bytes_total = finished_result.total;
+    let throughput = ((finished_result.total as f64 * 8.0) / time_total_raw.as_secs_f64()) as u64;
+
+    let json = json!({
+        "dns_time":     dns_time,
+        "time_connect": time_connect,
+        "time_secure":  time_secure,
+        "time_body":    time_body,
+        "time_total":   time_total,
+        "bytes_total":  bytes_total,
+        "throughput":   throughput,
+    });
+
+    println!("{:#}", json);
 
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
         shutdown.cancel();
