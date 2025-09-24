@@ -22,6 +22,7 @@ pub async fn run(url: String, runs: usize) -> anyhow::Result<()> {
     let result = run_test(&LatencyConfig {
         url: url.parse()?,
         runs,
+        no_tls: false,
     })
     .await?;
 
@@ -48,6 +49,7 @@ pub async fn run_test(config: &LatencyConfig) -> anyhow::Result<LatencyResult> {
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
         shutdown.clone(),
+        config.no_tls,
     )) as Arc<dyn Network>;
 
     let rtt = Latency::new(config.clone());

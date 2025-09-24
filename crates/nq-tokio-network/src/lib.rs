@@ -23,10 +23,8 @@ pub struct TokioNetwork {
 }
 
 impl TokioNetwork {
-    pub fn new(time: Arc<dyn Time>, shutdown: CancellationToken) -> Self {
-        Self {
-            inner: TokioNetworkInner::new(time, shutdown),
-        }
+    pub fn new(time: Arc<dyn Time>, shutdown: CancellationToken, no_tls: bool) -> Self {
+        Self { inner: TokioNetworkInner::new(time, shutdown, no_tls) }
     }
 }
 
@@ -123,8 +121,8 @@ pub struct TokioNetworkInner {
 }
 
 impl TokioNetworkInner {
-    pub fn new(time: Arc<dyn Time>, shutdown: CancellationToken) -> Self {
-        let connections: Arc<ConnectionManager> = Default::default();
+    pub fn new(time: Arc<dyn Time>, shutdown: CancellationToken, no_tls: bool) -> Self {
+        let connections: Arc<ConnectionManager> = Arc::new(ConnectionManager::new(no_tls));
 
         tokio::spawn({
             let connections = Arc::clone(&connections);
@@ -137,11 +135,7 @@ impl TokioNetworkInner {
             }
         });
 
-        Self {
-            connections,
-            time,
-            shutdown,
-        }
+        Self { connections, time, shutdown }
     }
 
     async fn new_connection(

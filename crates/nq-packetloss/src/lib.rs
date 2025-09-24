@@ -69,6 +69,7 @@ impl PacketLossConfig {
             download_url: self.download_url.clone(),
             upload_url: self.upload_url.clone(),
             upload_size: 4_000_000_000, // 4 GB
+            no_tls: false,
         }
     }
 }
@@ -104,7 +105,7 @@ impl PacketLoss {
         // Start generating load on the network in both directions
         let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
         let network =
-            Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
+            Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone(), false)) as Arc<dyn Network>;
 
         self.new_load_generating_connection(
             packet_event_tx.clone(),

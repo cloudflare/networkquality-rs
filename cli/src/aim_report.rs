@@ -16,6 +16,7 @@ use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
+use url::Url;
 
 use crate::util::{pretty_ms, pretty_secs_to_ms};
 
@@ -84,13 +85,22 @@ impl CloudflareAimResults {
 
     pub async fn upload(&self) -> anyhow::Result<()> {
         let results = self.clone();
-        let origin = self.origin.clone();
+        // Always report over HTTPS regardless of --no-tls test mode. If an http origin was
+        // provided (should not normally happen), rewrite scheme to https for the upload.
+        let mut origin = self.origin.clone();
+    if let Ok(mut parsed) = Url::parse(&origin) {
+            if parsed.scheme() != "https" {
+                let _ = parsed.set_scheme("https");
+                origin = parsed.to_string();
+            }
+        }
 
         let shutdown = CancellationToken::new();
         let time = Arc::new(TokioTime::new());
         let network = Arc::new(TokioNetwork::new(
             Arc::clone(&time) as Arc<dyn Time>,
             shutdown,
+            false,
         ));
 
         let mut headers = HeaderMap::new();
@@ -98,8 +108,8 @@ impl CloudflareAimResults {
         headers.append("Content-Type", HeaderValue::from_static("application/json"));
         let body = serde_json::to_string(&results).unwrap();
 
+        // Force a fresh H2 (TLS) connection for AIM upload.
         let response = Client::default()
-            .new_connection(nq_core::ConnectionType::H2)
             .new_connection(nq_core::ConnectionType::H2)
             .headers(headers)
             .method("POST")
