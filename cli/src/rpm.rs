@@ -106,7 +106,11 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
 
     println!("{}", serde_json::to_string_pretty(&report)?);
 
-    let _ = timeout(Duration::from_secs(1), upload_handle).await;
+    let upload_timeout_secs = std::env::var("MACH_UPLOAD_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+    let _ = timeout(Duration::from_secs(upload_timeout_secs), upload_handle).await;
 
     Ok(())
 }
