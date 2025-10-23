@@ -9,13 +9,13 @@ use tokio::sync::RwLock;
 use http::{Request, Response};
 use hyper::body::Incoming;
 use nq_core::{
-    oneshot_result, ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection,
-    Network, NqBody, OneshotResult, ResponseFuture, Time, Timestamp,
+    ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection, Network, NqBody,
+    OneshotResult, ResponseFuture, Time, Timestamp, oneshot_result,
 };
 
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, Instrument};
+use tracing::{Instrument, error, info};
 
 #[derive(Debug, Clone)]
 pub struct TokioNetwork {

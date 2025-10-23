@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::connection::http::{
-    start_h1_conn, start_h2_conn, tls_connection, EstablishedConnection,
+    EstablishedConnection, start_h1_conn, start_h2_conn, tls_connection,
 };
 use crate::util::ByteStream;
 use crate::{ConnectionTiming, ConnectionType, ResponseFuture, Time};

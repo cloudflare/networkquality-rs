@@ -73,7 +73,9 @@ impl CounterSeries {
             .copied()
             .zip(self.samples.get(end_idx.saturating_sub(1)).copied())?;
 
-        debug!("sample interval: from={from:?}, to={to:?}, start_idx={start_idx}, end_idx={end_idx}, start={start:?}, end={end:?}");
+        debug!(
+            "sample interval: from={from:?}, to={to:?}, start_idx={start_idx}, end_idx={end_idx}, start={start:?}, end={end:?}"
+        );
 
         Some(SampleRange { start, end })
     }

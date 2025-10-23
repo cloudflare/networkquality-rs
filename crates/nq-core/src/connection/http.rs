@@ -7,15 +7,15 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 
 use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use boring::x509::store::X509StoreBuilder;
 use boring::x509::X509;
+use boring::x509::store::X509StoreBuilder;
 use http::{Request, Response};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, Instrument};
+use tracing::{Instrument, debug, error, info};
 
 use crate::body::NqBody;
 use crate::util::ByteStream;
