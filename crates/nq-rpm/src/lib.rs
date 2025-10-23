@@ -10,16 +10,16 @@ use std::{
     time::Duration,
 };
 
-use humansize::{format_size, DECIMAL};
+use humansize::{DECIMAL, format_size};
 use nq_core::{
-    client::{wait_for_finish, Direction, ThroughputClient},
     ConnectionType, Network, Time, Timestamp,
+    client::{Direction, ThroughputClient, wait_for_finish},
 };
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
-use nq_stats::{instant_minus_intervals, TimeSeries};
+use nq_stats::{TimeSeries, instant_minus_intervals};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, Instrument};
+use tracing::{Instrument, debug, error, info};
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -55,9 +55,7 @@ impl Default for ResponsivenessConfig {
             small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
             moving_average_distance: 4,
             interval_duration: Duration::from_millis(1000),
             test_duration: Duration::from_secs(20),

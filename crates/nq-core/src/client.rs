@@ -16,11 +16,12 @@ use hyper::body::{Body, Bytes, Incoming};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, Instrument};
+use tracing::{Instrument, debug, error, info};
 
 use crate::{
-    body::{empty, BodyEvent, CountingBody, InflightBody, NqBody, UploadBody},
-    oneshot_result, ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
+    ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
+    body::{BodyEvent, CountingBody, InflightBody, NqBody, UploadBody, empty},
+    oneshot_result,
 };
 
 /// The default user agent for networkquality requests

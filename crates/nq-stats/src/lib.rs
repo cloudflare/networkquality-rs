@@ -153,7 +153,7 @@ mod tests {
 
     use nq_core::Timestamp;
 
-    use crate::{instant_minus_intervals, TimeSeries};
+    use crate::{TimeSeries, instant_minus_intervals};
 
     fn avg_first_n(n: f64) -> f64 {
         (n + 1.0) / 2.0
