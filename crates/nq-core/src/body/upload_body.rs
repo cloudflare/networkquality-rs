@@ -26,7 +26,7 @@ impl UploadBody {
     pub fn new(size: usize) -> Self {
         const CHUNK_SIZE: usize = 256 * 1024; // 256 KB
 
-        let mut rng = StdRng::from_os_rng();
+        let mut rng = StdRng::from_entropy();
         let chunk_size = std::cmp::min(CHUNK_SIZE, size);
         let mut chunk = vec![0u8; chunk_size];
         rng.fill(&mut chunk[..]);
