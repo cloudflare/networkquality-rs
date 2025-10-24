@@ -59,7 +59,7 @@ async fn fetch_turn_server_creds(
     headers.append(hyper::header::HOST, HeaderValue::from_str(host)?);
 
     let response = Client::default()
-        .new_connection(ConnectionType::H1)
+        .new_connection(ConnectionType::h1())
         .method("GET")
         .headers(headers)
         .send(

@@ -6,6 +6,7 @@ pub(crate) mod rpm;
 pub(crate) mod up_down;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use nq_core::ConnectionType;
 use packet_loss::PacketLossArgs;
 
 use crate::args::rpm::RpmArgs;
@@ -77,7 +78,19 @@ pub enum Command {
 /// Describes which underlying transport a connection uses.
 #[derive(Debug, Clone, ValueEnum)]
 pub enum ConnType {
+    H1ClearText,
     H1,
     H2,
     H3,
+}
+
+impl From<ConnType> for ConnectionType {
+    fn from(conn_type: ConnType) -> Self {
+        match conn_type {
+            ConnType::H1ClearText => ConnectionType::H1 { use_tls: false },
+            ConnType::H1 => ConnectionType::H1 { use_tls: true },
+            ConnType::H2 => ConnectionType::H2,
+            ConnType::H3 => ConnectionType::H3,
+        }
+    }
 }

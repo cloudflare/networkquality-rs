@@ -14,12 +14,37 @@ pub use self::map::ConnectionManager;
 /// The L7 type of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionType {
-    /// Create an HTTP/1.1 connection.
-    H1,
+    /// Create an HTTP/1.1 connection. To disable tls, set `use_tls: false`.
+    H1 {
+        /// enable tls for this HTTP/1.1 connection.
+        use_tls: bool,
+    },
     /// Create an HTTP/2 connection.
     H2,
     /// Create an HTTP/3 connection.
     H3,
+}
+
+impl ConnectionType {
+    /// Creates an HTTP/1.1 connection type with TLS disabled.
+    pub fn h1_clear_text() -> ConnectionType {
+        ConnectionType::H1 { use_tls: false }
+    }
+
+    /// Creates an HTTP/1.1 connection type.
+    pub fn h1() -> ConnectionType {
+        ConnectionType::H1 { use_tls: true }
+    }
+
+    /// Creates an HTTP/2 connection type.
+    pub fn h2() -> ConnectionType {
+        ConnectionType::H2
+    }
+
+    /// Creates an HTTP/3 connection type.
+    pub fn h3() -> ConnectionType {
+        ConnectionType::H3
+    }
 }
 
 /// Timing stats for the establishment of a connection. All durations

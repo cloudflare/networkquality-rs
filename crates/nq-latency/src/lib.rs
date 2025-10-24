@@ -71,8 +71,9 @@ impl Latency {
                 .context("unable to resolve host")?;
             let time_lookup = time.now();
 
+            let conn_type = ConnectionType::H1 { use_tls: true };
             let connection = network
-                .new_connection(conn_start, addrs[0], host.to_string(), ConnectionType::H1)
+                .new_connection(conn_start, addrs[0], host.to_string(), conn_type)
                 .await
                 .context("unable to create new connection")?;
             {

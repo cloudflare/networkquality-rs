@@ -6,6 +6,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
+use anyhow::bail;
 use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use boring::x509::X509;
 use boring::x509::store::X509StoreBuilder;
@@ -78,7 +79,10 @@ pub async fn tls_connection(
     builder.set_verify(SslVerifyMode::PEER);
 
     let alpn: &[u8] = match conn_type {
-        ConnectionType::H1 => b"\x08http/1.1",
+        ConnectionType::H1 { use_tls: false } => {
+            bail!("cannot create tls connection if `use_tls: false`")
+        }
+        ConnectionType::H1 { use_tls: true } => b"\x08http/1.1",
         ConnectionType::H2 => b"\x02h2",
         ConnectionType::H3 => b"\x02h3",
     };
