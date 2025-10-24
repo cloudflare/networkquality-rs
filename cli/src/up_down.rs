@@ -39,6 +39,8 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
         .timing
         .context("expected inflight body to have connection timing data")?;
 
+    info!("headers: {:?}", inflight_body.headers);
+
     let body_start = time.now();
     let finished_result = wait_for_finish(inflight_body.events).await?;
     let finished = time.now();
@@ -74,7 +76,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run a download test.
+/// Run an upload test.
 // todo(fisher): investigate body completion events. Moving to Socket stats is
 // likely the best option.
 #[allow(dead_code)]
@@ -86,8 +88,7 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
 
     let conn_type = args.conn_type.into();
     let bytes = args.bytes.unwrap_or(10_000_000);
-
-    println!("{}\n", args.url);
+    info!("uploading {bytes} bytes to: {}", args.url);
 
     let inflight_body = ThroughputClient::upload(bytes)
         .new_connection(conn_type)
@@ -96,12 +97,16 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
             Arc::clone(&network),
             Arc::clone(&time),
             shutdown.clone(),
-        )?
-        .await?;
+        )
+        .context("sending upload POST")?
+        .await
+        .context("waiting for upload POST response")?;
 
     let timing = inflight_body
         .timing
         .context("expected inflight body to have connection timing data")?;
+
+    info!("headers: {:?}", inflight_body.headers);
 
     let body_start = time.now();
     let finished_result = wait_for_finish(inflight_body.events).await?;

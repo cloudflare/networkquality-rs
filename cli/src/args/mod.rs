@@ -3,6 +3,7 @@
 
 pub(crate) mod packet_loss;
 pub(crate) mod rpm;
+pub(crate) mod saturate;
 pub(crate) mod up_down;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -10,7 +11,9 @@ use nq_core::ConnectionType;
 use packet_loss::PacketLossArgs;
 
 use crate::args::rpm::RpmArgs;
-use crate::args::up_down::DownloadArgs;
+use crate::args::saturate::SaturateArgs;
+// use crate::args::saturate::SaturateArgs;
+use crate::args::up_down::{DownloadArgs, UploadArgs};
 
 /// mach runs multiple different network performance tests. The main focus of
 /// mach and this tool is to implement the IETF draft: "Responsiveness under
@@ -40,7 +43,7 @@ pub enum Command {
     Download(DownloadArgs),
     /// Upload data (POST) to an endpoint,  reporting latency measurements and total
     /// throughput.
-    // Upload(UploadArgs),
+    Upload(UploadArgs),
     /// Determine the Round-Trip-Time (RTT), or latency, of a link using the
     /// time it takes to establish a TCP connection.
     ///
@@ -58,6 +61,10 @@ pub enum Command {
     },
     /// Send UDP packets to a TURN server, reporting lost packets.
     PacketLoss(PacketLossArgs),
+    /// Saturate the network in some direction and report maximum goodput. The
+    /// direction, `up`, `down`, `both` must be specified. By default, the
+    /// command runs for 20s.
+    Saturate(SaturateArgs),
 }
 
 // todo(fisher): figure out proxy chaining. Preparsing args or using the -- sentinal?

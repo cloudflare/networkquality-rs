@@ -107,7 +107,24 @@ impl ThroughputClient {
         }
 
         let host = uri.host().context("uri is missing a host")?.to_string();
-        let host_with_port = format!("{}:{}", host, uri.port_u16().unwrap_or(443));
+        debug!(
+            "host: {}, uri: {}, uri.scheme: {:?}",
+            host,
+            uri,
+            uri.scheme_str()
+        );
+        let host_with_port = format!(
+            "{}:{}",
+            host,
+            uri.port_u16().unwrap_or_else(|| {
+                if matches!(uri.scheme_str(), Some("http") | None) {
+                    80
+                } else {
+                    443
+                }
+            })
+        );
+        debug!("host with port: {host_with_port}");
 
         let method = match self.direction {
             Direction::Down => "GET",
@@ -142,9 +159,8 @@ impl ThroughputClient {
             .uri(uri)
             .body(body)?;
 
-        tracing::debug!("created request");
-
         *request.headers_mut() = headers.clone();
+        tracing::debug!("created request: {request:?}");
 
         tokio::spawn(
             async move {
@@ -201,6 +217,7 @@ impl ThroughputClient {
                     }
                     Direction::Down => {
                         let (parts, incoming) = response_fut.await?.into_parts();
+                        info!("download response parts: {:?}", parts);
 
                         let (counting_body, events) = CountingBody::new(
                             incoming,

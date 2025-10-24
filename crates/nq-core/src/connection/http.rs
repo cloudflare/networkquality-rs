@@ -10,7 +10,8 @@ use anyhow::bail;
 use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use boring::x509::X509;
 use boring::x509::store::X509StoreBuilder;
-use http::{Request, Response};
+use http::header::HOST;
+use http::{HeaderValue, Request, Response};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
@@ -188,8 +189,11 @@ pub enum SendRequest {
 impl SendRequest {
     fn send_request(
         &mut self,
-        req: Request<NqBody>,
+        mut req: Request<NqBody>,
     ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Incoming>>> + Send>> {
+        // inject the host header it it's missing and this is an HTTP/1.1 req.
+        self.insert_host_if_missing(&mut req);
+
         match self {
             SendRequest::H1 {
                 dispatch: send_request,
@@ -198,6 +202,18 @@ impl SendRequest {
                 dispatch: send_request,
             } => Box::pin(send_request.send_request(req)),
         }
+    }
+
+    fn insert_host_if_missing(&mut self, req: &mut Request<NqBody>) {
+        if !matches!(self, SendRequest::H1 { .. }) && !req.headers().contains_key(HOST) {
+            return;
+        }
+
+        let Some(Ok(host)) = req.uri().host().map(HeaderValue::from_str) else {
+            return;
+        };
+
+        req.headers_mut().insert(HOST, host);
     }
 }
 
