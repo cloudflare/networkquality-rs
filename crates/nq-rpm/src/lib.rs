@@ -33,6 +33,8 @@ pub struct ResponsivenessConfig {
     pub trimmed_mean_percent: f64,
     pub std_tolerance: f64,
     pub max_loaded_connections: usize,
+    pub conn_type: ConnectionType,
+    pub determine_load_only: bool,
 }
 
 impl ResponsivenessConfig {
@@ -62,6 +64,8 @@ impl Default for ResponsivenessConfig {
             trimmed_mean_percent: 0.95,
             std_tolerance: 0.05,
             max_loaded_connections: 16,
+            conn_type: ConnectionType::H2,
+            determine_load_only: false,
         }
     }
 }
@@ -135,7 +139,10 @@ impl Responsiveness {
         let (event_tx, mut event_rx) = mpsc::channel(1024);
 
         self.new_load_generating_connection(event_tx.clone(), &env, shutdown.clone())?;
-        self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+
+        if !self.config.determine_load_only {
+            self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+        }
 
         loop {
             select! {
@@ -401,7 +408,7 @@ impl Responsiveness {
     ) -> anyhow::Result<()> {
         let oneshot_res = self.load_generator.new_loaded_connection(
             self.direction,
-            ConnectionType::H2,
+            self.config.conn_type,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
             shutdown,
