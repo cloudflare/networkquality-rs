@@ -40,9 +40,13 @@ impl ConnectionManager {
         shutdown: CancellationToken,
     ) -> Result<Arc<RwLock<EstablishedConnection>>> {
         let connection = match conn_type {
-            ConnectionType::H1 => {
-                let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-                start_h1_conn(domain, timing, stream, time, shutdown).await?
+            ConnectionType::H1 { use_tls } => {
+                if use_tls {
+                    let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
+                    start_h1_conn(domain, timing, stream, time, shutdown).await?
+                } else {
+                    start_h1_conn(domain, timing, io, time, shutdown).await?
+                }
             }
             ConnectionType::H2 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;

@@ -5,13 +5,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use nq_core::client::{wait_for_finish, ThroughputClient};
-use nq_core::{ConnectionType, Network, Time, TokioTime};
+use nq_core::{Network, Time, TokioTime};
 use nq_tokio_network::TokioNetwork;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::args::up_down::{DownloadArgs, UploadArgs};
-use crate::args::ConnType;
 use crate::util::pretty_secs;
 
 use serde_json::json;
@@ -23,12 +22,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let network =
         Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
-    let conn_type = match args.conn_type {
-        ConnType::H1 => ConnectionType::H1,
-        ConnType::H2 => ConnectionType::H2,
-        ConnType::H3 => unimplemented!("H3 is not yet implemented"), // ConnectionType::H3,
-    };
-
+    let conn_type = args.conn_type.into();
     info!("downloading: {}", args.url);
 
     let inflight_body = ThroughputClient::download()
@@ -90,12 +84,7 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let network =
         Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
-    let conn_type = match args.conn_type {
-        ConnType::H1 => ConnectionType::H1, // ConnectionType::H1,
-        ConnType::H2 => ConnectionType::H2,
-        ConnType::H3 => unimplemented!("H3 is not yet implemented"), // ConnectionType::H3,
-    };
-
+    let conn_type = args.conn_type.into();
     let bytes = args.bytes.unwrap_or(10_000_000);
 
     println!("{}\n", args.url);
