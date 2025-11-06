@@ -18,7 +18,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 pin-project-lite = { workspace = true }
 rand = { workspace = true }
 rustls-native-certs = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "test-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "test-util", "macros"] }
 tokio-boring = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
