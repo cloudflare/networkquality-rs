@@ -92,15 +92,15 @@ impl ThroughputClient {
     }
 
     /// Execute a download or upload request against the given [`Uri`].
-    #[tracing::instrument(skip(self, network, time, shutdown))]
+    // #[tracing::instrument(skip(self, network, time, shutdown))]
     pub fn send(
-        self,
+        mut self,
         uri: Uri,
         network: Arc<dyn Network>,
         time: Arc<dyn Time>,
         shutdown: CancellationToken,
     ) -> anyhow::Result<OneshotResult<InflightBody>> {
-        let mut headers = self.headers.unwrap_or_default();
+        let mut headers = self.headers.take().unwrap_or_default();
 
         if !headers.contains_key("User-Agent") {
             headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
@@ -166,25 +166,9 @@ impl ThroughputClient {
             async move {
                 let start = time.now();
 
-                let connection = if let Some(connection) = self.connection {
-                    connection
-                } else if let Some(conn_type) = self.new_connection_type {
-                    info!("creating new connection to {host_with_port}");
-
-                    let addrs = network
-                        .resolve(host_with_port)
-                        .await
-                        .context("unable to resolve host")?;
-
-                    debug!("addrs: {addrs:?}");
-
-                    network
-                        .new_connection(start, addrs[0], host, conn_type)
-                        .await
-                        .context("creating new connection")?
-                } else {
-                    todo!()
-                };
+                let connection = self
+                    .get_or_create_connection(&network, host, host_with_port, start)
+                    .await?;
 
                 let conn_timing = {
                     let conn = connection.read().await;
@@ -194,72 +178,20 @@ impl ThroughputClient {
                 debug!("connection used");
                 let response_fut = network.send_request(connection.clone(), request);
 
-                let mut response_body = match self.direction {
-                    Direction::Up(_) => {
-                        debug!("sending upload events");
-                        if tx
-                            .send(Ok(InflightBody {
-                                connection: connection.clone(),
-                                timing: Some(conn_timing),
-                                events: events.expect("events were set above"),
-                                start,
-                                headers,
-                            }))
-                            .is_err()
-                        {
-                            error!("error sending upload events");
-                        }
+                let response_body = self
+                    .create_response_body(
+                        time,
+                        headers,
+                        tx,
+                        events,
+                        start,
+                        connection,
+                        conn_timing,
+                        response_fut,
+                    )
+                    .await?;
 
-                        let (parts, incoming) = response_fut.await?.into_parts();
-                        info!("upload response parts: {:?}", parts);
-
-                        incoming.boxed()
-                    }
-                    Direction::Down => {
-                        let (parts, incoming) = response_fut.await?.into_parts();
-                        info!("download response parts: {:?}", parts);
-
-                        let (counting_body, events) = CountingBody::new(
-                            incoming,
-                            Duration::from_millis(100),
-                            Arc::clone(&time),
-                        );
-
-                        debug!("sending download events");
-                        if tx
-                            .send(Ok(InflightBody {
-                                connection: connection.clone(),
-                                timing: Some(conn_timing),
-                                start,
-                                events,
-                                headers: parts.headers,
-                            }))
-                            .is_err()
-                        {
-                            error!("error sending download events");
-                        }
-
-                        counting_body.boxed()
-                    }
-                };
-
-                tokio::spawn(
-                    async move {
-                        // Consume the response body and keep the connection alive. Stop if we hit an error.
-                        info!("waiting for response body");
-
-                        loop {
-                            select! {
-                                Some(res) = response_body.frame() => if let Err(e) = res {
-                                    error!("body closing: {e}");
-                                    break;
-                                },
-                                _ = shutdown.cancelled() => break,
-                            }
-                        }
-                    }
-                    .in_current_span(),
-                );
+                tokio::spawn(consume_body(shutdown, response_body).in_current_span());
 
                 Ok::<_, anyhow::Error>(())
             }
@@ -267,6 +199,112 @@ impl ThroughputClient {
         );
 
         Ok(rx)
+    }
+
+    async fn create_response_body(
+        &self,
+        time: Arc<dyn Time>,
+        headers: HeaderMap,
+        tx: tokio::sync::oneshot::Sender<Result<InflightBody, anyhow::Error>>,
+        events: Option<mpsc::UnboundedReceiver<BodyEvent>>,
+        start: Timestamp,
+        connection: Arc<RwLock<EstablishedConnection>>,
+        conn_timing: crate::ConnectionTiming,
+        response_fut: OneshotResult<http::Response<Incoming>>,
+    ) -> Result<http_body_util::combinators::BoxBody<Bytes, hyper::Error>, anyhow::Error> {
+        let response_body = match self.direction {
+            Direction::Up(_) => {
+                debug!("sending upload events");
+                if tx
+                    .send(Ok(InflightBody {
+                        connection: connection.clone(),
+                        timing: Some(conn_timing),
+                        events: events.expect("events were set above"),
+                        start,
+                        headers,
+                    }))
+                    .is_err()
+                {
+                    error!("error sending upload events");
+                }
+
+                let (parts, incoming) = response_fut.await?.into_parts();
+                info!("upload response parts: {:?}", parts);
+
+                incoming.boxed()
+            }
+            Direction::Down => {
+                let (parts, incoming) = response_fut.await?.into_parts();
+                info!("download response parts: {:?}", parts);
+
+                let (counting_body, events) =
+                    CountingBody::new(incoming, Duration::from_millis(100), Arc::clone(&time));
+
+                debug!("sending download events");
+                if tx
+                    .send(Ok(InflightBody {
+                        connection: connection.clone(),
+                        timing: Some(conn_timing),
+                        start,
+                        events,
+                        headers: parts.headers,
+                    }))
+                    .is_err()
+                {
+                    error!("error sending download events");
+                }
+
+                counting_body.boxed()
+            }
+        };
+        Ok(response_body)
+    }
+
+    async fn get_or_create_connection(
+        &mut self,
+        network: &Arc<dyn Network>,
+        host: String,
+        host_with_port: String,
+        start: Timestamp,
+    ) -> Result<Arc<RwLock<EstablishedConnection>>, anyhow::Error> {
+        let connection = if let Some(connection) = self.connection.take() {
+            connection
+        } else if let Some(conn_type) = self.new_connection_type {
+            info!("creating new connection to {host_with_port}");
+
+            let addrs = network
+                .resolve(host_with_port)
+                .await
+                .context("unable to resolve host")?;
+
+            debug!("addrs: {addrs:?}");
+
+            network
+                .new_connection(start, addrs[0], host, conn_type)
+                .await
+                .context("creating new connection")?
+        } else {
+            todo!()
+        };
+
+        Ok(connection)
+    }
+}
+
+async fn consume_body(
+    shutdown: CancellationToken,
+    response_body: http_body_util::combinators::BoxBody<Bytes, hyper::Error>,
+) -> impl Future<Output = ()> {
+    // Consume the response body and keep the connection alive. Stop if we hit an error.
+    info!("waiting for response body");
+    loop {
+        select! {
+            Some(res) = response_body.frame() => if let Err(e) = res {
+                error!("body closing: {e}");
+                break;
+            },
+            _ = shutdown.cancelled() => break,
+        }
     }
 }
 
