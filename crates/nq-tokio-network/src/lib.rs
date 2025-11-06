@@ -15,7 +15,7 @@ use nq_core::{
 
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, error, info};
+use tracing::{Instrument, debug, error, info, trace};
 
 #[derive(Debug, Clone)]
 pub struct TokioNetwork {
@@ -87,8 +87,7 @@ impl Network for TokioNetwork {
         let inner = self.inner.clone();
         tokio::spawn(
             async move {
-                info!("sending request");
-
+                trace!("sending request");
                 let response_result = match inner.send_request(connection, request).await {
                     Ok(fut) => fut.await,
                     Err(error) => {
@@ -105,7 +104,7 @@ impl Network for TokioNetwork {
                     }
                 };
 
-                info!("sending response future");
+                trace!("sending response future");
                 let _ = tx.send(Ok(response));
             }
             .in_current_span(),
@@ -174,13 +173,12 @@ impl TokioNetworkInner {
         Ok(connection)
     }
 
-    #[tracing::instrument(skip(self, request), fields(uri=%request.uri()))]
     async fn send_request(
         &self,
         connection: Arc<RwLock<EstablishedConnection>>,
         request: http::Request<NqBody>,
     ) -> anyhow::Result<ResponseFuture> {
-        info!("sending request");
+        debug!("sending request");
 
         let mut conn = connection.write().await;
         let response_fut = conn

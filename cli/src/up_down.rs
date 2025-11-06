@@ -106,8 +106,6 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
         .timing
         .context("expected inflight body to have connection timing data")?;
 
-    info!("headers: {:?}", inflight_body.headers);
-
     let body_start = time.now();
     let finished_result = wait_for_finish(inflight_body.events).await?;
     let finished = time.now();

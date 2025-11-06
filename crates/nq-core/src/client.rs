@@ -16,7 +16,7 @@ use hyper::body::{Body, Bytes, Incoming};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, error, info};
+use tracing::{Instrument, debug, error, info, trace};
 
 use crate::{
     ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
@@ -107,12 +107,6 @@ impl ThroughputClient {
         }
 
         let host = uri.host().context("uri is missing a host")?.to_string();
-        debug!(
-            "host: {}, uri: {}, uri.scheme: {:?}",
-            host,
-            uri,
-            uri.scheme_str()
-        );
         let host_with_port = format!(
             "{}:{}",
             host,
@@ -124,7 +118,7 @@ impl ThroughputClient {
                 }
             })
         );
-        debug!("host with port: {host_with_port}");
+        debug!("host: {host_with_port}");
 
         let method = match self.direction {
             Direction::Down => "GET",
@@ -136,7 +130,7 @@ impl ThroughputClient {
 
         let body: NqBody = match self.direction {
             Direction::Up(size) => {
-                tracing::debug!("tracking upload body");
+                tracing::trace!("tracking upload body");
                 let dummy_body = UploadBody::new(size);
 
                 let (body, events_rx) =
@@ -164,36 +158,22 @@ impl ThroughputClient {
 
         tokio::spawn(
             async move {
-                let start = time.now();
-
-                let connection = self
-                    .get_or_create_connection(&network, host, host_with_port, start)
-                    .await?;
-
-                let conn_timing = {
-                    let conn = connection.read().await;
-                    conn.timing()
-                };
-
-                debug!("connection used");
-                let response_fut = network.send_request(connection.clone(), request);
-
-                let response_body = self
-                    .create_response_body(
+                if let Err(error) = self
+                    .send_request(
+                        network,
                         time,
+                        shutdown,
                         headers,
+                        host,
+                        host_with_port,
                         tx,
                         events,
-                        start,
-                        connection,
-                        conn_timing,
-                        response_fut,
+                        request,
                     )
-                    .await?;
-
-                tokio::spawn(consume_body(shutdown, response_body).in_current_span());
-
-                Ok::<_, anyhow::Error>(())
+                    .await
+                {
+                    error!("error sending ThroughputClient request: {error:#}");
+                }
             }
             .in_current_span(),
         );
@@ -201,6 +181,51 @@ impl ThroughputClient {
         Ok(rx)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn send_request(
+        mut self,
+        network: Arc<dyn Network>,
+        time: Arc<dyn Time>,
+        shutdown: CancellationToken,
+        headers: HeaderMap,
+        host: String,
+        host_with_port: String,
+        tx: tokio::sync::oneshot::Sender<Result<InflightBody, anyhow::Error>>,
+        events: Option<mpsc::UnboundedReceiver<BodyEvent>>,
+        request: http::Request<http_body_util::combinators::BoxBody<Bytes, Infallible>>,
+    ) -> Result<Result<(), anyhow::Error>, anyhow::Error> {
+        let start = time.now();
+        let connection = self
+            .get_or_create_connection(&network, host, host_with_port, start)
+            .await?;
+        let conn_timing = {
+            let conn = connection.read().await;
+            conn.timing()
+        };
+
+        debug!("sending request");
+        let response_fut = network.send_request(connection.clone(), request);
+
+        let response_body = self
+            .create_response_body(
+                time,
+                headers,
+                tx,
+                events,
+                start,
+                connection,
+                conn_timing,
+                response_fut,
+            )
+            .await
+            .context("creating response body")?;
+
+        tokio::spawn(consume_body(shutdown, response_body).in_current_span());
+
+        Ok(Ok::<_, anyhow::Error>(()))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn create_response_body(
         &self,
         time: Arc<dyn Time>,
@@ -214,7 +239,7 @@ impl ThroughputClient {
     ) -> Result<http_body_util::combinators::BoxBody<Bytes, hyper::Error>, anyhow::Error> {
         let response_body = match self.direction {
             Direction::Up(_) => {
-                debug!("sending upload events");
+                trace!("sending upload events");
                 if tx
                     .send(Ok(InflightBody {
                         connection: connection.clone(),
@@ -228,7 +253,10 @@ impl ThroughputClient {
                     error!("error sending upload events");
                 }
 
-                let (parts, incoming) = response_fut.await?.into_parts();
+                let (parts, incoming) = response_fut
+                    .await
+                    .context("waiting for response")?
+                    .into_parts();
                 info!("upload response parts: {:?}", parts);
 
                 incoming.boxed()
@@ -293,8 +321,8 @@ impl ThroughputClient {
 
 async fn consume_body(
     shutdown: CancellationToken,
-    response_body: http_body_util::combinators::BoxBody<Bytes, hyper::Error>,
-) -> impl Future<Output = ()> {
+    mut response_body: http_body_util::combinators::BoxBody<Bytes, hyper::Error>,
+) {
     // Consume the response body and keep the connection alive. Stop if we hit an error.
     info!("waiting for response body");
     loop {
