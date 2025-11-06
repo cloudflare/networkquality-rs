@@ -117,7 +117,7 @@ pub async fn start_h1_conn(
         async move {
             select! {
                 Err(e) = connection => {
-                    error!(error=%e, "error running h1 connection");
+                    debug!(error=%e, "error running h1 connection");
                 }
                 _ = shutdown.cancelled() => {
                     debug!("shutting down h1 connection");
