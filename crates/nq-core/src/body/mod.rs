@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use http::{HeaderMap, HeaderValue};
-use http_body_util::{combinators::BoxBody, Empty};
+use http_body_util::{Empty, combinators::BoxBody};
 use hyper::body::Bytes;
 use tokio::sync::mpsc;
 
@@ -21,7 +21,7 @@ pub fn empty() -> Empty<Bytes> {
     Empty::new()
 }
 
-use crate::{connection::ConnectionTiming, EstablishedConnection, Timestamp};
+use crate::{EstablishedConnection, Timestamp, connection::ConnectionTiming};
 
 pub use self::{
     counting_body::{BodyEvent, CountingBody},

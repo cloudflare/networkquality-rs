@@ -10,15 +10,15 @@ readme = "../README.md"
 [dependencies]
 anyhow = { workspace = true }
 boring = { workspace = true }
+bytes = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 pin-project-lite = { workspace = true }
-rustls-native-certs = "0.7.0"
-tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "test-util"] }
+rand = { workspace = true }
+rustls-native-certs = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "test-util", "macros"] }
 tokio-boring = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-rand = "0.9.0-beta.1"
-bytes = "1.6.0"

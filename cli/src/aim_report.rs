@@ -132,9 +132,9 @@ impl CloudflareAimResults {
 #[serde(rename_all = "camelCase")]
 pub struct BpsMeasurement {
     /// The total number of bytes.
-    bytes: usize,
+    pub(crate) bytes: usize,
     /// The bits per second of the transfer.
-    bps: usize,
+    pub(crate) bps: usize,
 }
 
 impl BpsMeasurement {
@@ -154,7 +154,7 @@ impl BpsMeasurement {
     }
 
     /// Use the test duration and network capacity to create a synthetic bps result.
-    fn from_rpm_result(rpm_result: &ResponsivenessResult) -> BpsMeasurement {
+    pub(crate) fn from_rpm_result(rpm_result: &ResponsivenessResult) -> BpsMeasurement {
         let throughput = rpm_result.throughput().unwrap_or(0) as f64;
 
         let bytes = throughput * rpm_result.duration.as_secs_f64();
@@ -190,7 +190,7 @@ impl Default for PacketLossMeasurement {
 /// https://developers.cloudflare.com/speed/aim/
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(missing_docs)]
+#[allow(missing_docs, dead_code)]
 pub enum AimScore {
     Streaming {
         points: usize,

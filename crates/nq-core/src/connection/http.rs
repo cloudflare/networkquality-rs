@@ -6,16 +6,18 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
+use anyhow::bail;
 use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use boring::x509::store::X509StoreBuilder;
 use boring::x509::X509;
-use http::{Request, Response};
+use boring::x509::store::X509StoreBuilder;
+use http::header::HOST;
+use http::{HeaderValue, Request, Response};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, Instrument};
+use tracing::{Instrument, debug, error, info};
 
 use crate::body::NqBody;
 use crate::util::ByteStream;
@@ -78,7 +80,10 @@ pub async fn tls_connection(
     builder.set_verify(SslVerifyMode::PEER);
 
     let alpn: &[u8] = match conn_type {
-        ConnectionType::H1 => b"\x08http/1.1",
+        ConnectionType::H1 { use_tls: false } => {
+            bail!("cannot create tls connection if `use_tls: false`")
+        }
+        ConnectionType::H1 { use_tls: true } => b"\x08http/1.1",
         ConnectionType::H2 => b"\x02h2",
         ConnectionType::H3 => b"\x02h3",
     };
@@ -112,7 +117,7 @@ pub async fn start_h1_conn(
         async move {
             select! {
                 Err(e) = connection => {
-                    error!(error=%e, "error running h1 connection");
+                    debug!(error=%e, "error running h1 connection");
                 }
                 _ = shutdown.cancelled() => {
                     debug!("shutting down h1 connection");
@@ -184,8 +189,11 @@ pub enum SendRequest {
 impl SendRequest {
     fn send_request(
         &mut self,
-        req: Request<NqBody>,
+        mut req: Request<NqBody>,
     ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Incoming>>> + Send>> {
+        // inject the host header it it's missing and this is an HTTP/1.1 req.
+        self.insert_host_if_missing(&mut req);
+
         match self {
             SendRequest::H1 {
                 dispatch: send_request,
@@ -194,6 +202,18 @@ impl SendRequest {
                 dispatch: send_request,
             } => Box::pin(send_request.send_request(req)),
         }
+    }
+
+    fn insert_host_if_missing(&mut self, req: &mut Request<NqBody>) {
+        if !matches!(self, SendRequest::H1 { .. }) && !req.headers().contains_key(HOST) {
+            return;
+        }
+
+        let Some(Ok(host)) = req.uri().host().map(HeaderValue::from_str) else {
+            return;
+        };
+
+        req.headers_mut().insert(HOST, host);
     }
 }
 

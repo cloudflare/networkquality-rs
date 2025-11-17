@@ -9,15 +9,12 @@
 
 mod webrtc_data_channel;
 
-use nq_core::{
-    client::Direction,
-    ConnectionType, Network, Time, TokioTime,
-};
+use nq_core::{ConnectionType, Network, Time, TokioTime, client::Direction};
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
 use std::{cmp::min, collections::HashMap, fmt::Display, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use url::Url;
@@ -55,9 +52,7 @@ impl Default for PacketLossConfig {
             download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
         }
     }
 }
@@ -339,7 +334,7 @@ pub struct TurnServerCreds {
 #[cfg(test)]
 mod tests {
     use crate::{
-        webrtc_data_channel::tests::TestTurnServer, PacketLoss, PacketLossConfig, PacketLossResult,
+        PacketLoss, PacketLossConfig, PacketLossResult, webrtc_data_channel::tests::TestTurnServer,
     };
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
@@ -363,9 +358,7 @@ mod tests {
             download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
         let packet_loss_result = packet_loss
@@ -471,9 +464,7 @@ mod tests {
             download_url: "https://h3.speed.cloudflare.com/__down?bytes=10000000000"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
 

@@ -20,13 +20,14 @@ pub struct UploadBody {
     remaining: usize,
     chunk: Bytes,
     rng: StdRng,
+    finished: bool,
 }
 
 impl UploadBody {
     pub fn new(size: usize) -> Self {
         const CHUNK_SIZE: usize = 256 * 1024; // 256 KB
 
-        let mut rng = StdRng::from_os_rng();
+        let mut rng = StdRng::from_entropy();
         let chunk_size = std::cmp::min(CHUNK_SIZE, size);
         let mut chunk = vec![0u8; chunk_size];
         rng.fill(&mut chunk[..]);
@@ -35,6 +36,7 @@ impl UploadBody {
             remaining: size,
             chunk: Bytes::from(chunk),
             rng,
+            finished: false,
         }
     }
 }
@@ -54,7 +56,10 @@ impl Body for UploadBody {
         );
 
         Poll::Ready(match self.remaining {
-            0 => None,
+            0 => {
+                self.finished = true;
+                None
+            }
             remaining if remaining > self.chunk.len() => {
                 self.remaining -= self.chunk.len();
                 // Use BytesMut for in-place modifications
@@ -67,13 +72,14 @@ impl Body for UploadBody {
             }
             remaining => {
                 self.remaining = 0;
+                self.finished = true;
                 Some(Ok(Frame::data(self.chunk.slice(..remaining))))
             }
         })
     }
 
     fn is_end_stream(&self) -> bool {
-        self.remaining == 0
+        self.finished
     }
 
     fn size_hint(&self) -> SizeHint {
