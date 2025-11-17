@@ -172,7 +172,7 @@ impl ThroughputClient {
                     )
                     .await
                 {
-                    error!("error sending ThroughputClient request: {error:#}");
+                    debug!("error sending ThroughputClient request: {error:#}");
                 }
             }
             .in_current_span(),
@@ -327,9 +327,19 @@ async fn consume_body(
     info!("waiting for response body");
     loop {
         select! {
-            Some(res) = response_body.frame() => if let Err(e) = res {
-                error!("body closing: {e}");
-                break;
+            res = response_body.frame() => match res {
+                Some(Ok(_)) => {
+                    // Continue consuming frames
+                },
+                Some(Err(e)) => {
+                    error!("body closing: {e}");
+                    break;
+                },
+                None => {
+                    // Body finished successfully
+                    debug!("response body finished");
+                    break;
+                }
             },
             _ = shutdown.cancelled() => break,
         }
