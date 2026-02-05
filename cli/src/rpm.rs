@@ -25,10 +25,11 @@ use crate::util::pretty_secs_to_ms;
 pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     info!("running responsiveness test");
 
-    let rpm_urls = match cli_config.config.clone() {
+
+    let mut rpm_urls = match cli_config.config.clone() {
         Some(endpoint) => {
             info!("fetching configuration from {endpoint}");
-            let urls = get_rpm_config(endpoint).await?.urls;
+            let urls = get_rpm_config(endpoint, cli_config.no_tls).await?.urls;
             info!("retrieved configuration urls: {urls:?}");
 
             urls
@@ -45,11 +46,41 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         }
     };
 
+    // If --no-tls is specified, automatically convert provided HTTPS test URLs to HTTP.
+    // We only rewrite schemes; host, path, query, fragment remain unchanged.
+    if cli_config.no_tls {
+        let downgrade = |orig: &str| -> String {
+            if let Ok(mut url) = url::Url::parse(orig) {
+                if url.scheme() == "https" {
+                    // Ignore result of set_scheme (fails only if new scheme invalid length per spec).
+                    let _ = url.set_scheme("http");
+                    return url.to_string();
+                }
+            }
+            orig.to_string()
+        };
+
+        let original = rpm_urls.clone();
+        rpm_urls.small_https_download_url = downgrade(&rpm_urls.small_https_download_url);
+        rpm_urls.large_https_download_url = downgrade(&rpm_urls.large_https_download_url);
+        rpm_urls.https_upload_url = downgrade(&rpm_urls.https_upload_url);
+        info!(
+            "converted urls for --no-tls: small: {} -> {}, large: {} -> {}, upload: {} -> {}",
+            original.small_https_download_url,
+            rpm_urls.small_https_download_url,
+            original.large_https_download_url,
+            rpm_urls.large_https_download_url,
+            original.https_upload_url,
+            rpm_urls.https_upload_url
+        );
+    }
+
     // first get unloaded RTT measurements
     info!("determining unloaded latency");
     let rtt_result = crate::latency::run_test(&LatencyConfig {
         url: rpm_urls.small_https_download_url.parse()?,
         runs: 20,
+        no_tls: cli_config.no_tls,
     })
     .await?;
     info!(
@@ -74,6 +105,7 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         trimmed_mean_percent: cli_config.trimmed_mean_percent,
         std_tolerance: cli_config.std_tolerance,
         max_loaded_connections: cli_config.max_loaded_connections,
+        no_tls: cli_config.no_tls,
     };
 
     info!("running download test");
@@ -124,6 +156,7 @@ async fn run_test(
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time),
         shutdown.clone().into(),
+        config.no_tls,
     )) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
@@ -143,7 +176,7 @@ pub struct RpmServerConfig {
     urls: RpmUrls,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RpmUrls {
     #[serde(alias = "small_download_url")]
     small_https_download_url: String,
@@ -153,16 +186,19 @@ pub struct RpmUrls {
     https_upload_url: String,
 }
 
-pub async fn get_rpm_config(config_url: String) -> anyhow::Result<RpmServerConfig> {
+pub async fn get_rpm_config(config_url: String, no_tls: bool) -> anyhow::Result<RpmServerConfig> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new());
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time) as Arc<dyn Time>,
         shutdown.clone(),
+        no_tls,
     ));
 
+    let conn_type = if no_tls { ConnectionType::H1 } else { ConnectionType::H2 };
     let response = Client::default()
-        .new_connection(ConnectionType::H2)
+        .plain_http_mode(no_tls)
+        .new_connection(conn_type)
         .method("GET")
         .send(
             config_url.parse().context("parsing rpm config url")?,

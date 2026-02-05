@@ -55,13 +55,18 @@ struct RpmReport {
 
 impl RpmReport {
     pub fn from_rpm_result(result: &ResponsivenessResult) -> anyhow::Result<RpmReport> {
+        let throughput = result.throughput().context("no throughputs available")?;
+        let loaded_latency_ms = match result.self_probe_latencies.quantile(0.5).map(pretty_ms) {
+            Some(v) => v,
+            None => {
+                tracing::warn!("no loaded latency measurements; defaulting to 0ms");
+                0.0
+            }
+        };
+
         Ok(RpmReport {
-            throughput: result.throughput().context("no throughputs available")?,
-            loaded_latency_ms: result
-                .self_probe_latencies
-                .quantile(0.5)
-                .map(pretty_ms)
-                .context("no loaded latency measurements")?,
+            throughput,
+            loaded_latency_ms,
             rpm: result.rpm as usize,
         })
     }

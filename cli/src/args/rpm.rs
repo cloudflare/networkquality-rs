@@ -69,6 +69,10 @@ pub struct RpmArgs {
     /// https://blog.cloudflare.com/aim-database-for-internet-quality/
     #[clap(long)]
     pub disable_aim_scores: bool,
+    /// Disable TLS for H1 connections (plain TCP). When set, HTTP/1.1 is used
+    /// without a TLS handshake; otherwise HTTP/2 is preferred.
+    #[clap(long = "no-tls")]
+    pub no_tls: bool,
 }
 
 impl Default for RpmArgs {
@@ -86,6 +90,7 @@ impl Default for RpmArgs {
             interval_duration_ms: 1000, // 1s
             test_duration_ms: 12_000,   // 12s
             disable_aim_scores: false,
+            no_tls: false,
         }
     }
 }

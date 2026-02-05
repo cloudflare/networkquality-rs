@@ -77,10 +77,14 @@ pub async fn tls_connection(
     builder.set_verify_cert_store(store_builder.build())?;
     builder.set_verify(SslVerifyMode::PEER);
 
+    // Offer ALPN protocols. For H2 we also offer http/1.1 as a fallback so that if the
+    // server declines h2 we can downgrade gracefully instead of sending an h2 preface
+    // on a connection the server expects to speak HTTP/1.1 (which leads to an immediate RST).
+    // Wire format: each protocol is prefixed with length byte.
     let alpn: &[u8] = match conn_type {
         ConnectionType::H1 => b"\x08http/1.1",
-        ConnectionType::H2 => b"\x02h2",
-        ConnectionType::H3 => b"\x02h3",
+        ConnectionType::H2 => b"\x02h2\x08http/1.1",
+        ConnectionType::H3 => b"\x02h3", // TODO: QUIC required; placeholder
     };
 
     builder.set_alpn_protos(alpn)?;
@@ -91,8 +95,12 @@ pub async fn tls_connection(
         .map_err(|e| anyhow::anyhow!("unable to create tls stream: {e}"))?;
 
     timing.set_secure(time.now());
-
-    debug!("created tls connection");
+    let negotiated_alpn = ssl_stream
+        .ssl()
+        .selected_alpn_protocol()
+        .map(|p| String::from_utf8_lossy(p).to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+    debug!(alpn=%negotiated_alpn, "created tls connection");
 
     Ok(ssl_stream)
 }
@@ -139,10 +147,40 @@ pub async fn start_h2_conn(
     addr: SocketAddr,
     domain: String,
     mut timing: ConnectionTiming,
-    io: impl ByteStream,
+    io: TlsStream,
     time: &dyn Time,
     shutdown: CancellationToken,
 ) -> anyhow::Result<EstablishedConnection> {
+    // Inspect negotiated ALPN directly from the TLS stream.
+    let negotiated = io
+        .ssl()
+        .selected_alpn_protocol()
+        .map(|p| String::from_utf8_lossy(p).to_string());
+
+    match negotiated.as_deref() {
+        Some("h2") => debug!(alpn="h2", "proceeding with h2 handshake"),
+        Some("http/1.1") | None | Some("") => {
+            debug!(alpn=?negotiated, "ALPN not h2; falling back to HTTP/1.1 on existing TLS session");
+            let (send_request, connection) = http1::handshake(TokioIo::new(io)).await?;
+            timing.set_application(time.now());
+            tokio::spawn(
+                async move {
+                    select! {
+                        Err(e) = connection => { error!(error=%e, "error running h1(fallback) connection"); }
+                        _ = shutdown.cancelled() => { debug!("shutting down h1(fallback) connection"); }
+                    }
+                    info!("connection finished");
+                }
+                .in_current_span(),
+            );
+            info!(?timing, "established fallback h1 connection");
+            return Ok(EstablishedConnection::new(timing, SendRequest::H1 { dispatch: send_request }));
+        }
+        Some(other) => {
+            debug!(alpn=other, "unexpected ALPN; attempting h2 anyway");
+        }
+    }
+
     let (dispatch, connection) = http2::handshake(TokioExecutor, TokioIo::new(io)).await?;
     timing.set_application(time.now());
 
