@@ -100,6 +100,7 @@ impl ThroughputClient {
         time: Arc<dyn Time>,
         shutdown: CancellationToken,
     ) -> anyhow::Result<OneshotResult<InflightBody>> {
+        debug!("headers: {:?}", self.headers);
         let mut headers = self.headers.take().unwrap_or_default();
 
         if !headers.contains_key("User-Agent") {
@@ -137,7 +138,6 @@ impl ThroughputClient {
                     CountingBody::new(dummy_body, Duration::from_millis(50), Arc::clone(&time));
                 events = Some(events_rx);
 
-                headers.insert("Content-Length", size.into());
                 headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
 
                 body.boxed()

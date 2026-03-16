@@ -29,14 +29,14 @@ pub enum Direction {
         #[clap(
             short,
             long,
-            default_value = "http://speed.cloudflare.com/__down?bytes=1000000000"
+            default_value = "http://h3.speed.cloudflare.com/__down?bytes=10000000000"
         )]
         download_url: String,
     },
     /// Saturate the upload (egress) side of the network.
     Up {
         /// The URL to upload data to.
-        #[clap(short, long, default_value = "http://speed.cloudflare.com/__up")]
+        #[clap(short, long, default_value = "http://h3.speed.cloudflare.com/__up")]
         upload_url: String,
     },
     /// Saturate both the download (ingress) and upload (egress) side of the network.
@@ -45,11 +45,11 @@ pub enum Direction {
         #[clap(
             short,
             long,
-            default_value = "http://speed.cloudflare.com/__down?bytes=1000000000"
+            default_value = "http://h3.speed.cloudflare.com/__down?bytes=10000000000"
         )]
         download_url: String,
         /// The URL to upload data to.
-        #[clap(short, long, default_value = "http://speed.cloudflare.com/__up")]
+        #[clap(short, long, default_value = "http://h3.speed.cloudflare.com/__up")]
         upload_url: String,
     },
 }
@@ -57,7 +57,7 @@ pub enum Direction {
 impl Default for Direction {
     fn default() -> Self {
         Self::Down {
-            download_url: "http://speed.cloudflare.com/__down?bytes=1000000000".into(),
+            download_url: "http://h3.speed.cloudflare.com/__down?bytes=10000000000".into(),
         }
     }
 }

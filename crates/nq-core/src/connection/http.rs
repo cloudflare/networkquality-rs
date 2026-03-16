@@ -67,7 +67,7 @@ pub async fn tls_connection(
     io: impl ByteStream,
     time: &dyn Time,
 ) -> anyhow::Result<TlsStream> {
-    let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+    let mut builder = SslConnector::builder(SslMethod::tls())?;
 
     // Use platform CA certs
     let mut store_builder = X509StoreBuilder::new()?;

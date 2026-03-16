@@ -28,7 +28,7 @@ nq-tokio-network = { path = "./crates/nq-tokio-network" }
 
 anyhow = "1.0"
 async-trait = { version = "0.1" }
-boring = "4.11.0"
+boring = "5.0"
 bytes = "1.6.0"
 clap = "4.3"
 clap-verbosity-flag = "2.1"
@@ -47,6 +47,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 tokio = "1.43"
 tokio-util = "0.7"
-tokio-boring = "4.11.0"
+tokio-boring = "5.0"
 url = "2.4"
 webrtc = "0.12.0"

@@ -83,6 +83,6 @@ impl Body for UploadBody {
     }
 
     fn size_hint(&self) -> SizeHint {
-        SizeHint::with_exact(self.remaining as u64)
+        SizeHint::new()
     }
 }

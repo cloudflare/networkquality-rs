@@ -1,6 +1,7 @@
 // Copyright (c) 2023-2024 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -79,7 +80,6 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 /// Run an upload test.
 // todo(fisher): investigate body completion events. Moving to Socket stats is
 // likely the best option.
-#[allow(dead_code)]
 pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
@@ -90,8 +90,26 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
     let bytes = args.bytes.unwrap_or(10_000_000);
     info!("uploading {bytes} bytes to: {}", args.url);
 
+    let mut headers = http::HeaderMap::new();
+    for header in args.headers {
+        let Some((key, value)) = header.split_once(":") else {
+            anyhow::bail!("headers must be in the format `header: <value>`");
+        };
+
+        let key = http::HeaderName::from_str(key.trim()).context("unable to parse header name")?;
+        headers.append(
+            key.clone(),
+            value
+                .trim()
+                .try_into()
+                .context("unable to parse header value")?,
+        );
+        info!("added header: {key}");
+    }
+
     let inflight_body = ThroughputClient::upload(bytes)
         .new_connection(conn_type)
+        .headers(headers)
         .send(
             args.url.parse()?,
             Arc::clone(&network),
