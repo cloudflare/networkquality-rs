@@ -35,9 +35,12 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         }
         None => {
             let urls = RpmUrls {
+                small_download_url: cli_config.small_download_url.clone(),
                 small_https_download_url: cli_config.small_download_url,
+                large_download_url: cli_config.large_download_url.clone(),
                 large_https_download_url: cli_config.large_download_url,
-                https_upload_url: cli_config.upload_url,
+                https_upload_url: cli_config.upload_url.clone(),
+                upload_url: cli_config.upload_url,
             };
             info!("using default configuration urls: {urls:?}");
 
@@ -145,11 +148,11 @@ pub struct RpmServerConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RpmUrls {
-    #[serde(alias = "small_download_url")]
+    small_download_url: String,
     small_https_download_url: String,
-    #[serde(alias = "large_download_url")]
+    large_download_url: String,
     large_https_download_url: String,
-    #[serde(alias = "upload_url")]
+    upload_url: String,
     https_upload_url: String,
 }
 
