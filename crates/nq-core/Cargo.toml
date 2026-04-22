@@ -20,5 +20,5 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "test-
 tokio-boring = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-rand = "0.9.0-beta.1"
+rand = "0.8.6"
 bytes = "1.11.1"
