@@ -45,10 +45,8 @@ pub async fn run(url: String, runs: usize) -> anyhow::Result<()> {
 pub async fn run_test(config: &LatencyConfig) -> anyhow::Result<LatencyResult> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let rtt = Latency::new(config.clone());
     let results = rtt.run_test(network, time, shutdown).await?;

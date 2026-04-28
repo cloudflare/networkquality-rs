@@ -35,9 +35,12 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         }
         None => {
             let urls = RpmUrls {
+                small_download_url: cli_config.small_download_url.clone(),
                 small_https_download_url: cli_config.small_download_url,
+                large_download_url: cli_config.large_download_url.clone(),
                 large_https_download_url: cli_config.large_download_url,
-                https_upload_url: cli_config.upload_url,
+                https_upload_url: cli_config.upload_url.clone(),
+                upload_url: cli_config.upload_url,
             };
             info!("using default configuration urls: {urls:?}");
 
@@ -74,6 +77,8 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         trimmed_mean_percent: cli_config.trimmed_mean_percent,
         std_tolerance: cli_config.std_tolerance,
         max_loaded_connections: cli_config.max_loaded_connections,
+        conn_type: ConnectionType::H2,
+        determine_load_only: false,
     };
 
     info!("running download test");
@@ -121,10 +126,8 @@ async fn run_test(
 ) -> anyhow::Result<ResponsivenessResult> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
-    let network = Arc::new(TokioNetwork::new(
-        Arc::clone(&time),
-        shutdown.clone().into(),
-    )) as Arc<dyn Network>;
+    let network =
+        Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
     let result = rpm.run_test(network, time, shutdown.clone()).await?;
@@ -145,11 +148,11 @@ pub struct RpmServerConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RpmUrls {
-    #[serde(alias = "small_download_url")]
+    small_download_url: String,
     small_https_download_url: String,
-    #[serde(alias = "large_download_url")]
+    large_download_url: String,
     large_https_download_url: String,
-    #[serde(alias = "upload_url")]
+    upload_url: String,
     https_upload_url: String,
 }
 

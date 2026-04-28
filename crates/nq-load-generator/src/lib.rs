@@ -7,14 +7,14 @@ use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{
-    oneshot_result, BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, Time,
-    Timestamp,
+    BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
+    oneshot_result,
 };
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 

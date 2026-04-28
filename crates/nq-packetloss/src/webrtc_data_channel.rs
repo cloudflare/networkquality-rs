@@ -6,13 +6,14 @@ use std::sync::{Arc, Weak};
 use tokio::sync::mpsc::UnboundedSender;
 use webrtc::{
     api::APIBuilder,
-    data_channel::{data_channel_init::RTCDataChannelInit, RTCDataChannel},
+    data_channel::{RTCDataChannel, data_channel_init::RTCDataChannelInit},
     ice_transport::{
         ice_candidate::RTCIceCandidate, ice_protocol::RTCIceProtocol, ice_server::RTCIceServer,
     },
     peer_connection::{
-        configuration::RTCConfiguration, peer_connection_state::RTCPeerConnectionState,
-        policy::ice_transport_policy::RTCIceTransportPolicy, RTCPeerConnection,
+        RTCPeerConnection, configuration::RTCConfiguration,
+        peer_connection_state::RTCPeerConnectionState,
+        policy::ice_transport_policy::RTCIceTransportPolicy,
     },
 };
 
@@ -270,8 +271,8 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        webrtc_data_channel::{DataChannelEvent, WebRTCDataChannel},
         TurnServerCreds,
+        webrtc_data_channel::{DataChannelEvent, WebRTCDataChannel},
     };
 
     // Canned password for the test TURN server

@@ -6,7 +6,6 @@ repository = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = "../README.md"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 nq-core = { workspace = true }
