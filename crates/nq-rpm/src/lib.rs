@@ -13,8 +13,9 @@ use std::{
 use humansize::{format_size, DECIMAL};
 use nq_core::{
     client::{wait_for_finish, Direction, ThroughputClient},
-    ConnectionType, Network, Time, Timestamp,
+    ConnectionType, Network, Time, Timestamp, EstablishedConnection,
 };
+use tokio::sync::RwLock;
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_stats::{instant_minus_intervals, TimeSeries};
 use tokio::{select, sync::mpsc};
@@ -33,6 +34,7 @@ pub struct ResponsivenessConfig {
     pub trimmed_mean_percent: f64,
     pub std_tolerance: f64,
     pub max_loaded_connections: usize,
+    pub no_tls: bool,
 }
 
 impl ResponsivenessConfig {
@@ -41,7 +43,11 @@ impl ResponsivenessConfig {
             headers: HashMap::default(),
             download_url: self.large_download_url.clone(),
             upload_url: self.upload_url.clone(),
-            upload_size: 4_000_000_000, // 4 GB
+            // Preserve original large upload size for HTTPS path to keep behavior identical.
+            // When running in --no-tls mode we override this later when constructing the
+            // Responsiveness instance for uploads.
+            upload_size: 4_000_000_000, // 4 GB (legacy default)
+            no_tls: self.no_tls,
         }
     }
 }
@@ -64,6 +70,7 @@ impl Default for ResponsivenessConfig {
             trimmed_mean_percent: 0.95,
             std_tolerance: 0.05,
             max_loaded_connections: 16,
+            no_tls: false,
         }
     }
 }
@@ -81,10 +88,17 @@ pub struct Responsiveness {
     direction: Direction,
     rpm: f64,
     capacity: f64,
+    // Dedicated warm connection for self probes in non-multiplexed (H1) mode to avoid
+    // paying connection setup on every probe and inflating loaded latency.
+    self_probe_connection: Option<Arc<RwLock<EstablishedConnection>>>,
 }
 
 impl Responsiveness {
+    fn connection_type(&self) -> ConnectionType {
+        if self.config.no_tls { ConnectionType::H1 } else { ConnectionType::H2 }
+    }
     pub fn new(config: ResponsivenessConfig, download: bool) -> anyhow::Result<Self> {
+        let no_tls = config.no_tls; // capture before move
         let load_generator = LoadGenerator::new(config.load_config())?;
 
         Ok(Self {
@@ -99,11 +113,17 @@ impl Responsiveness {
             rpm_saturated: false,
             direction: if download {
                 Direction::Down
+            } else if no_tls {
+                // In no-tls (plain HTTP) mode, use reduced synthetic upload size to avoid
+                // extremely long single-connection uploads and exercise self-probe behavior.
+                Direction::Up(std::cmp::min(16u64 * 1024 * 1024, usize::MAX as u64) as usize)
             } else {
-                Direction::Up(std::cmp::min(32u64 * 1024 * 1024 * 1024, usize::MAX as u64) as usize)
+                // HTTPS path: preserve original behavior (large upload). 4GB is set in load config.
+                Direction::Up(4_000_000_000usize.min(usize::MAX))
             },
             rpm: 0.0,
             capacity: 0.0,
+            self_probe_connection: None,
         })
     }
 }
@@ -125,6 +145,29 @@ impl Responsiveness {
     ) -> anyhow::Result<ResponsivenessResult> {
         let env = Env { time, network };
         self.start = env.time.now();
+
+        if self.config.no_tls {
+            // Establish a dedicated warm self-probe connection (H1) so subsequent self probes
+            // measure in-connection latency instead of including connect time. This is only
+            // enabled for plain HTTP (--no-tls) mode. HTTPS code path remains unchanged from
+            // original implementation.
+            if self.self_probe_connection.is_none() {
+                if let Ok(inflight) = ThroughputClient::download().plain_http_mode(true)
+                    .new_connection(ConnectionType::H1)
+                    .send(
+                        self.config.small_download_url.as_str().parse()?,
+                        Arc::clone(&env.network),
+                        Arc::clone(&env.time),
+                        shutdown.clone(),
+                    )?
+                    .await
+                {
+                    // Wait for the tiny body to finish to ensure connection is idle.
+                    let _ = wait_for_finish(inflight.events).await;
+                    self.self_probe_connection = Some(inflight.connection);
+                }
+            }
+        }
 
         info!("running responsiveness test: {:?}", self.config);
 
@@ -403,7 +446,7 @@ impl Responsiveness {
     ) -> anyhow::Result<()> {
         let oneshot_res = self.load_generator.new_loaded_connection(
             self.direction,
-            ConnectionType::H2,
+            self.connection_type(),
             Arc::clone(&env.network),
             Arc::clone(&env.time),
             shutdown,
@@ -439,7 +482,7 @@ impl Responsiveness {
         shutdown: CancellationToken,
     ) -> anyhow::Result<()> {
         let inflight_body_fut = ThroughputClient::download()
-            .new_connection(ConnectionType::H2)
+            .new_connection(self.connection_type())
             .send(
                 self.config.small_download_url.as_str().parse()?,
                 Arc::clone(&env.network),
@@ -500,20 +543,59 @@ impl Responsiveness {
         env: &Env,
         shutdown: CancellationToken,
     ) -> anyhow::Result<bool> {
-        // The test client should uniformly and randomly select from the active
-        // load-generating connections on which to send self probes.
-        let Some(connection) = self.load_generator.random_connection() else {
-            return Ok(false);
+        let inflight_body_fut = if self.config.no_tls {
+            // Plain HTTP path (no multiplexing). Reuse warm dedicated or a finished load, else new.
+            if let Some(conn) = self.self_probe_connection.clone() {
+                ThroughputClient::download().plain_http_mode(true)
+                    .with_connection(conn)
+                    .send(
+                        self.config.small_download_url.as_str().parse()?,
+                        Arc::clone(&env.network),
+                        Arc::clone(&env.time),
+                        shutdown.clone(),
+                    )?
+            } else if let Some(conn) = self.load_generator.random_finished_connection() {
+                ThroughputClient::download().plain_http_mode(true)
+                    .with_connection(conn)
+                    .send(
+                        self.config.small_download_url.as_str().parse()?,
+                        Arc::clone(&env.network),
+                        Arc::clone(&env.time),
+                        shutdown.clone(),
+                    )?
+            } else {
+                ThroughputClient::download().plain_http_mode(true)
+                    .new_connection(self.connection_type())
+                    .send(
+                        self.config.small_download_url.as_str().parse()?,
+                        Arc::clone(&env.network),
+                        Arc::clone(&env.time),
+                        shutdown,
+                    )?
+            }
+        } else {
+            // HTTPS path with H2 multiplexing enabled: attempt to reuse an ongoing load connection.
+            if let Some(conn) = self.load_generator.random_connection() {
+                ThroughputClient::download().plain_http_mode(false)
+                    .with_connection(conn)
+                    .send(
+                        self.config.small_download_url.as_str().parse()?,
+                        Arc::clone(&env.network),
+                        Arc::clone(&env.time),
+                        shutdown.clone(),
+                    )?
+            } else {
+                // If no ongoing load yet, create a new one of the configured type (H2).
+                ThroughputClient::download().plain_http_mode(false)
+                    .new_connection(self.connection_type())
+                    .send(
+                        self.config.small_download_url.as_str().parse()?,
+                        Arc::clone(&env.network),
+                        Arc::clone(&env.time),
+                        shutdown,
+                    )?
+            }
         };
-
-        let inflight_body_fut = ThroughputClient::download()
-            .with_connection(connection)
-            .send(
-                self.config.small_download_url.as_str().parse()?,
-                Arc::clone(&env.network),
-                Arc::clone(&env.time),
-                shutdown,
-            )?;
 
         tokio::spawn(report_err(
             event_tx.clone(),

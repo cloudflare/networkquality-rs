@@ -24,6 +24,7 @@ pub struct LoadConfig {
     pub download_url: url::Url,
     pub upload_url: url::Url,
     pub upload_size: usize,
+    pub no_tls: bool,
 }
 
 pub struct LoadGenerator {
@@ -62,8 +63,8 @@ impl LoadGenerator {
         let (tx, rx) = oneshot_result();
 
         let client = match direction {
-            Direction::Down => ThroughputClient::download(),
-            Direction::Up(size) => ThroughputClient::upload(size),
+            Direction::Down => ThroughputClient::download().plain_http_mode(self.config.no_tls),
+            Direction::Up(size) => ThroughputClient::upload(size).plain_http_mode(self.config.no_tls),
         };
 
         let response_fut = client
@@ -111,6 +112,20 @@ impl LoadGenerator {
     pub fn random_connection(&self) -> Option<Arc<RwLock<EstablishedConnection>>> {
         let loads: Vec<_> = self.ongoing_loads().collect();
         loads
+            .choose(&mut rand::thread_rng())
+            .map(|c| c.connection.clone())
+    }
+
+    /// Select a random finished (idle) connection that has completed its load but
+    /// is still kept alive so it can be re-used for a self probe in non-multiplexed
+    /// protocols (e.g. HTTP/1.1) to avoid incurring connection setup latency.
+    pub fn random_finished_connection(&self) -> Option<Arc<RwLock<EstablishedConnection>>> {
+        let finished: Vec<_> = self
+            .loads
+            .iter()
+            .filter(|l| l.finished_at.is_some())
+            .collect();
+        finished
             .choose(&mut rand::thread_rng())
             .map(|c| c.connection.clone())
     }

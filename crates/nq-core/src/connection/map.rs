@@ -21,9 +21,20 @@ use crate::util::ByteStream;
 use crate::{ConnectionTiming, ConnectionType, ResponseFuture, Time};
 
 /// Creates and holds [`EstablishedConnection`]s in a VecDeque.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ConnectionManager {
     connections: RwLock<VecDeque<Arc<RwLock<EstablishedConnection>>>>,
+    no_tls: bool,
+}
+
+impl Default for ConnectionManager {
+    fn default() -> Self { Self { connections: RwLock::new(VecDeque::new()), no_tls: false } }
+}
+
+impl ConnectionManager {
+    /// Create a new `ConnectionManager` with the provided `no_tls` flag controlling
+    /// whether H1 connections skip the TLS handshake.
+    pub fn new(no_tls: bool) -> Self { Self { connections: RwLock::new(VecDeque::new()), no_tls } }
 }
 
 impl ConnectionManager {
@@ -41,8 +52,16 @@ impl ConnectionManager {
     ) -> Result<Arc<RwLock<EstablishedConnection>>> {
         let connection = match conn_type {
             ConnectionType::H1 => {
-                let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
-                start_h1_conn(domain, timing, stream, time, shutdown).await?
+                if self.no_tls {
+                    info!("Starting plain H1 (no TLS) connection to {}", domain);
+                    // Mark secure time immediately since no TLS handshake occurs.
+                    timing.set_secure(time.now());
+                    start_h1_conn(domain, timing, io, time, shutdown).await?
+                } else {
+                    info!("Starting TLS H1 connection to {}", domain);
+                    let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
+                    start_h1_conn(domain, timing, stream, time, shutdown).await?
+                }
             }
             ConnectionType::H2 => {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;

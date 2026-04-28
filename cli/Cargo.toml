@@ -28,3 +28,4 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "macro
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+url = { workspace = true }

@@ -17,6 +17,9 @@ use url::Url;
 pub struct LatencyConfig {
     pub url: Url,
     pub runs: usize,
+    /// Disable TLS for H1 connections (plain TCP). Used when higher level
+    /// command passes the `--no-tls` flag.
+    pub no_tls: bool,
 }
 
 impl Default for LatencyConfig {
@@ -26,6 +29,7 @@ impl Default for LatencyConfig {
                 .parse()
                 .unwrap(),
             runs: 20,
+            no_tls: false,
         }
     }
 }
@@ -61,7 +65,14 @@ impl Latency {
             let host = url
                 .host_str()
                 .context("small download url must have a domain")?;
-            let host_with_port = format!("{}:{}", host, url.port_or_known_default().unwrap_or(443));
+            // Use explicit default ports based on scheme: 443 for HTTPS, 80 for HTTP, else fallback to 443.
+            let default_port = match url.scheme() {
+                "https" => 443,
+                "http" => 80,
+                _ => 443,
+            };
+            let port = url.port().unwrap_or(default_port);
+            let host_with_port = format!("{}:{}", host, port);
 
             let conn_start = time.now();
 
@@ -71,8 +82,10 @@ impl Latency {
                 .context("unable to resolve host")?;
             let time_lookup = time.now();
 
+            // Use H1 only when TLS is disabled; otherwise prefer H2.
+            let conn_type = if self.config.no_tls { ConnectionType::H1 } else { ConnectionType::H2 };
             let connection = network
-                .new_connection(conn_start, addrs[0], host.to_string(), ConnectionType::H1)
+                .new_connection(conn_start, addrs[0], host.to_string(), conn_type)
                 .await
                 .context("unable to create new connection")?;
             {

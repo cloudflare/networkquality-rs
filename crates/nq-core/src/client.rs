@@ -49,6 +49,7 @@ pub struct ThroughputClient {
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
     direction: Direction,
+    plain_http_mode: bool,
 }
 
 impl ThroughputClient {
@@ -59,6 +60,7 @@ impl ThroughputClient {
             new_connection_type: None,
             headers: None,
             direction: Direction::Down,
+            plain_http_mode: false,
         }
     }
 
@@ -69,6 +71,7 @@ impl ThroughputClient {
             new_connection_type: None,
             headers: None,
             direction: Direction::Up(size),
+            plain_http_mode: false,
         }
     }
 
@@ -90,6 +93,14 @@ impl ThroughputClient {
         self
     }
 
+    /// Enable plain HTTP mode (no TLS) specific header adjustments.
+    ///
+    /// In this mode additional headers (Accept, Connection, Content-Length)
+    /// are injected to better emulate typical plain HTTP/1.1 client
+    /// behavior. Leaving this disabled preserves the minimal header set used
+    /// previously for HTTPS tests.
+    pub fn plain_http_mode(mut self, yes: bool) -> Self { self.plain_http_mode = yes; self }
+
     /// Execute a download or upload request against the given [`Uri`].
     #[tracing::instrument(skip(self, network, time, shutdown))]
     pub fn send(
@@ -105,8 +116,11 @@ impl ThroughputClient {
             headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
         }
 
-        let host = uri.host().context("uri is missing a host")?.to_string();
-        let host_with_port = format!("{}:{}", host, uri.port_u16().unwrap_or(443));
+
+    let host = uri.host().context("uri is missing a host")?.to_string();
+        // Use correct default port based on scheme so HTTPS downloads go to 443.
+        let default_port = match uri.scheme_str() { Some("https") => 443, _ => 80 };
+        let host_with_port = format!("{}:{}", host, uri.port_u16().unwrap_or(default_port));
 
         let method = match self.direction {
             Direction::Down => "GET",
@@ -144,6 +158,31 @@ impl ThroughputClient {
         tracing::debug!("created request");
 
         *request.headers_mut() = headers.clone();
+        // Capture URI parts before mutable borrow
+        let uri_host = request.uri().host().map(|s| s.to_string());
+        let uri_port = request.uri().port_u16();
+        let uri_scheme = request.uri().scheme_str().map(|s| s.to_string());
+        let h = request.headers_mut();
+        if let Some(host_hdr) = uri_host.as_deref() {
+            let scheme = uri_scheme.as_deref();
+            let default_port = match scheme { Some("https") => 443, _ => 80 };
+            let need_port = uri_port.is_some() && uri_port.unwrap() != default_port;
+            let host_value = if need_port { format!("{}:{}", host_hdr, uri_port.unwrap()) } else { host_hdr
+.to_string() };
+            if let Ok(val) = http::HeaderValue::from_str(&host_value) { h.insert("Host", val); }
+        }
+        if self.plain_http_mode {
+            h.insert("Accept", http::HeaderValue::from_static("*/*"));
+            h.insert("Connection", http::HeaderValue::from_static("keep-alive"));
+            if let Direction::Up(size) = self.direction {
+                if !h.contains_key("Content-Length") {
+                    if let Ok(val) = http::HeaderValue::from_str(&size.to_string()) {
+                        h.insert("Content-Length", val);
+                    }
+                }
+            }
+        }
+
 
         tokio::spawn(
             async move {
@@ -194,6 +233,8 @@ impl ThroughputClient {
                         }
 
                         let (parts, incoming) = response_fut.await?.into_parts();
+                        tracing::info!(status=?parts.status, headers=?parts.headers, "received response headers (upload)");
+
                         info!("upload response parts: {:?}", parts);
 
                         incoming.boxed()
@@ -262,6 +303,7 @@ pub struct Client {
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
     method: Option<String>,
+    plain_http_mode: bool,
 }
 
 impl Client {
@@ -289,6 +331,14 @@ impl Client {
         self
     }
 
+    /// Enable or disable plain (non-TLS) HTTP mode specific header normalization.
+    ///
+    /// When set to `true`, the client will add extra headers such as
+    /// `Accept: */*`, `Connection: keep-alive`, and (for sized bodies) a
+    /// `Content-Length`. In TLS mode
+    /// (`false`) these are omitted to preserve the original HTTPS behavior.
+    pub fn plain_http_mode(mut self, yes: bool) -> Self { self.plain_http_mode = yes; self }
+
     /// Send a request to the given uri with the given body, timing how long it
     /// took.
     #[tracing::instrument(skip(self, body, network, time))]
@@ -310,12 +360,28 @@ impl Client {
 
         let host = uri.host().context("uri is missing a host")?.to_string();
 
-        let remote_addr = (host.as_str(), uri.port_u16().unwrap_or(443))
+        // Choose default port based on scheme (https -> 443, http -> 80, else 443)
+        let default_port = match uri.scheme_str() {
+            Some("https") => 443,
+            Some("http") => 80,
+            _ => 443,
+        };
+        let remote_addr = (host.as_str(), uri.port_u16().unwrap_or(default_port))
             .to_socket_addrs()?
             .next()
             .context("could not resolve large download url")?;
 
         let method: http::Method = self.method.as_deref().unwrap_or("GET").parse()?;
+
+        // Add Content-Length if body reports an exact size and header not already set.
+        if !headers.contains_key("Content-Length") {
+            let size_hint = body.size_hint();
+            if let Some(exact) = size_hint.exact() {
+                if let Ok(v) = HeaderValue::from_str(&exact.to_string()) {
+                    headers.insert("Content-Length", v);
+                }
+            }
+        }
 
         let mut request = http::Request::builder()
             .method(method)
@@ -323,6 +389,29 @@ impl Client {
             .body(body.boxed())?;
 
         *request.headers_mut() = headers.clone();
+        // Always ensure Host header is present (required for HTTP/1.1). Only include port
+        // if it differs from the default for the scheme.
+        {
+            let uri_host = request.uri().host().map(|s| s.to_string());
+            if let Some(host_hdr) = uri_host.as_deref() {
+                let uri_port = request.uri().port_u16();
+                let scheme = request.uri().scheme_str();
+                let default_port = match scheme { Some("https") => 443, Some("http") => 80, _ => 443 };
+                let need_port = uri_port.is_some() && uri_port.unwrap() != default_port;
+                let host_value = if need_port { format!("{}:{}", host_hdr, uri_port.unwrap()) } else { host_hdr.to_string() };
+                let h = request.headers_mut();
+                if !h.contains_key("Host") {
+                    if let Ok(val) = http::HeaderValue::from_str(&host_value) { h.insert("Host", val); }
+                }
+            }
+        }
+
+        // Plain HTTP (no TLS) mode header normalization
+        if self.plain_http_mode {
+            let h = request.headers_mut();
+            h.insert("Accept", http::HeaderValue::from_static("*/*"));
+            h.insert("Connection", http::HeaderValue::from_static("keep-alive"));
+        }
 
         debug!("sending request");
 

@@ -49,6 +49,7 @@ async fn fetch_turn_server_creds(
     let network = Arc::new(TokioNetwork::new(
         Arc::clone(&time) as Arc<dyn Time>,
         shutdown.clone(),
+        false,
     ));
 
     let host = config
