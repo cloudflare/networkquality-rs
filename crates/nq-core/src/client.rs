@@ -36,6 +36,39 @@ pub enum Direction {
     Up(usize),
 }
 
+/// Returns a copy of `uri` with the `bytes` query parameter set to `size`,
+/// preserving any other existing query parameters.
+fn set_bytes_query(uri: Uri, size: usize) -> anyhow::Result<Uri> {
+    let mut parts = uri.into_parts();
+
+    let (path, existing_query) = match &parts.path_and_query {
+        Some(pq) => (pq.path().to_string(), pq.query()),
+        None => ("/".to_string(), None),
+    };
+
+    let mut query = String::new();
+    if let Some(existing) = existing_query {
+        for pair in existing.split('&').filter(|pair| !pair.is_empty()) {
+            // Drop any pre-existing `bytes` param; we set it from `size`.
+            if pair.split('=').next() == Some("bytes") {
+                continue;
+            }
+            if !query.is_empty() {
+                query.push('&');
+            }
+            query.push_str(pair);
+        }
+    }
+    if !query.is_empty() {
+        query.push('&');
+    }
+    query.push_str(&format!("bytes={size}"));
+
+    parts.path_and_query = Some(format!("{path}?{query}").parse()?);
+
+    Ok(Uri::from_parts(parts)?)
+}
+
 /// A [`ThroughputClient`] is a simple client which drives a request/response pair
 /// and returns an [`InflightBody`].
 ///
@@ -104,6 +137,13 @@ impl ThroughputClient {
         if !headers.contains_key("User-Agent") {
             headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
         }
+
+        // For uploads, include the number of bytes being sent as a `bytes=`
+        // query parameter, mirroring the convention already used for downloads.
+        let uri = match self.direction {
+            Direction::Up(size) => set_bytes_query(uri, size)?,
+            Direction::Down => uri,
+        };
 
         let host = uri.host().context("uri is missing a host")?.to_string();
         let host_with_port = format!("{}:{}", host, uri.port_u16().unwrap_or(443));
@@ -396,4 +436,27 @@ pub struct FinishResult {
     pub total: usize,
     /// When the body finished.
     pub finished_at: Timestamp,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::set_bytes_query;
+    use http::Uri;
+
+    #[test]
+    fn adds_bytes_query_when_absent() {
+        let uri: Uri = "https://h3.speed.cloudflare.com/__up".parse().unwrap();
+        let out = set_bytes_query(uri, 12345).unwrap();
+        assert_eq!(out.path(), "/__up");
+        assert_eq!(out.query(), Some("bytes=12345"));
+    }
+
+    #[test]
+    fn preserves_other_query_params_and_overrides_bytes() {
+        let uri: Uri = "https://h3.speed.cloudflare.com/__up?measId=abc&bytes=999"
+            .parse()
+            .unwrap();
+        let out = set_bytes_query(uri, 42).unwrap();
+        assert_eq!(out.query(), Some("measId=abc&bytes=42"));
+    }
 }
