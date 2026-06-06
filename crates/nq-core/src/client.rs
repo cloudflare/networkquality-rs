@@ -459,4 +459,14 @@ mod tests {
         let out = set_bytes_query(uri, 42).unwrap();
         assert_eq!(out.query(), Some("measId=abc&bytes=42"));
     }
+
+    #[test]
+    fn appends_bytes_after_existing_query_params() {
+        let uri: Uri = "https://h3.speed.cloudflare.com/__up?measId=abc"
+            .parse()
+            .unwrap();
+        let out = set_bytes_query(uri, 12345).unwrap();
+        assert_eq!(out.path(), "/__up");
+        assert_eq!(out.query(), Some("measId=abc&bytes=12345"));
+    }
 }
