@@ -34,7 +34,7 @@ pub struct UploadArgs {
     /// can be set.
     #[clap(short, long)]
     pub(crate) bytes: Option<usize>,
-    /// Upload the contents of a file. Only one of `bytes` or `file` can be set.
+    // /// Upload the contents of a file. Only one of `bytes` or `file` can be set.
     // #[clap(short, long)]
     // pub(crate) file: Option<PathBuf>,
     /// Headers to add to the request.

@@ -10,16 +10,16 @@ use std::{
     time::Duration,
 };
 
-use humansize::{format_size, DECIMAL};
+use humansize::{DECIMAL, format_size};
 use nq_core::{
-    client::{wait_for_finish, Direction, ThroughputClient},
     ConnectionType, Network, Time, Timestamp,
+    client::{Direction, ThroughputClient, wait_for_finish},
 };
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
-use nq_stats::{instant_minus_intervals, TimeSeries};
+use nq_stats::{TimeSeries, instant_minus_intervals};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, Instrument};
+use tracing::{Instrument, debug, error, info};
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -33,6 +33,8 @@ pub struct ResponsivenessConfig {
     pub trimmed_mean_percent: f64,
     pub std_tolerance: f64,
     pub max_loaded_connections: usize,
+    pub conn_type: ConnectionType,
+    pub determine_load_only: bool,
 }
 
 impl ResponsivenessConfig {
@@ -55,15 +57,15 @@ impl Default for ResponsivenessConfig {
             small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10"
                 .parse()
                 .unwrap(),
-            upload_url: "https://h3.speed.cloudflare.com/__up"
-                .parse()
-                .unwrap(),
+            upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
             moving_average_distance: 4,
             interval_duration: Duration::from_millis(1000),
             test_duration: Duration::from_secs(20),
             trimmed_mean_percent: 0.95,
             std_tolerance: 0.05,
             max_loaded_connections: 16,
+            conn_type: ConnectionType::H2,
+            determine_load_only: false,
         }
     }
 }
@@ -137,7 +139,10 @@ impl Responsiveness {
         let (event_tx, mut event_rx) = mpsc::channel(1024);
 
         self.new_load_generating_connection(event_tx.clone(), &env, shutdown.clone())?;
-        self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+
+        if !self.config.determine_load_only {
+            self.send_foreign_probe(event_tx.clone(), &env, shutdown.clone())?;
+        }
 
         loop {
             select! {
@@ -403,7 +408,7 @@ impl Responsiveness {
     ) -> anyhow::Result<()> {
         let oneshot_res = self.load_generator.new_loaded_connection(
             self.direction,
-            ConnectionType::H2,
+            self.config.conn_type,
             Arc::clone(&env.network),
             Arc::clone(&env.time),
             shutdown,
