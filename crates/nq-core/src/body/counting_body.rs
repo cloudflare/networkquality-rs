@@ -89,7 +89,7 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
-        let this = self.project();
+        let mut this = self.project();
 
         // stop the body if there's no event sender.
         if this.events_tx.is_closed() {
@@ -98,9 +98,8 @@ where
         }
 
         trace!("polling frame");
-        let size_hint_before = this.inner.size_hint();
 
-        match this.inner.poll_frame(cx) {
+        match this.inner.as_mut().poll_frame(cx) {
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
                     *this.total += data.len();
@@ -125,26 +124,10 @@ where
                     let _ = this.events_tx.send(event);
                 }
 
-                // Check if the body signals it's at the end after sending this
-                // frame. This handles cases where hyper won't poll the body
-                // again after the last frame. We use the size hint from before
-                // polling: if it shows exact remaining bytes equal to what we
-                // just sent, then this was the last frame.
-                //
-                // This does only work if the size of the body is known. E.g.
-                // this probably doesn't work for streamed bodies
-                //
-                // This fix works for RPM and saturation tests, so it should be
-                // sufficient for now. Ideally, we'd use TCP socket stats to
-                // calculate total throughput, but that's for later.
-                let frame_size = frame.data_ref().map(|d| d.len()).unwrap_or(0);
-                let was_last_frame = size_hint_before.upper() == Some(frame_size as u64)
-                    && size_hint_before.lower() == frame_size as u64;
-
-                if was_last_frame && !*this.sent_finished {
+                if this.inner.is_end_stream() && !*this.sent_finished {
                     debug!(
                         total = *this.total,
-                        "detected last frame via size_hint, sending finished event"
+                        "body reached end of stream, sending finished event"
                     );
                     let _ = this.events_tx.send(BodyEvent::ByteCount {
                         at: now,
@@ -164,16 +147,16 @@ where
                     total: *this.total,
                 };
 
-                debug!(
-                    ?event,
-                    total = *this.total,
-                    "sending final byte count event"
-                );
-                let _ = this.events_tx.send(event);
-
                 if !*this.sent_finished {
+                    debug!(
+                        ?event,
+                        total = *this.total,
+                        "sending final byte count event"
+                    );
+                    let _ = this.events_tx.send(event);
                     debug!(at=?now, "sending finished event");
                     let _ = this.events_tx.send(BodyEvent::Finished { at: now });
+                    *this.sent_finished = true;
                 } else {
                     debug!("already sent finish");
                 }
