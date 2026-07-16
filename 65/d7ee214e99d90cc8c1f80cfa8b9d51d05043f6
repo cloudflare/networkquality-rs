@@ -1,0 +1,19 @@
+crates/nq-core/src/body/counting_body.rs
+  s_476bbf15dd8f7d::t_30e30b009d52fc 92,102,127,130,151-156,159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "65d7ee214e99d90cc8c1f80cfa8b9d51d05043f6",
+  "prompts": {},
+  "sessions": {
+    "s_476bbf15dd8f7d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_093d382c3ffedyA6j2OcUdHvhK",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
