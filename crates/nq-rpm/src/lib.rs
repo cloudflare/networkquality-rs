@@ -12,7 +12,7 @@ use std::{
 
 use humansize::{DECIMAL, format_size};
 use nq_core::{
-    ConnectionType, Network, Time, Timestamp,
+    ConnectionType, Network, ScopedHeaders, Time, Timestamp,
     client::{Direction, ThroughputClient, wait_for_finish},
 };
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
@@ -35,12 +35,16 @@ pub struct ResponsivenessConfig {
     pub max_loaded_connections: usize,
     pub conn_type: ConnectionType,
     pub determine_load_only: bool,
+    /// Headers attached only to requests whose host matches the scope's
+    /// allowlist.
+    pub scoped_headers: Option<ScopedHeaders>,
 }
 
 impl ResponsivenessConfig {
     pub fn load_config(&self) -> LoadConfig {
         LoadConfig {
             headers: HashMap::default(),
+            scoped_headers: self.scoped_headers.clone(),
             download_url: self.large_download_url.clone(),
             upload_url: self.upload_url.clone(),
             upload_size: 4_000_000_000, // 4 GB
@@ -66,6 +70,7 @@ impl Default for ResponsivenessConfig {
             max_loaded_connections: 16,
             conn_type: ConnectionType::H2,
             determine_load_only: false,
+            scoped_headers: None,
         }
     }
 }
@@ -443,14 +448,17 @@ impl Responsiveness {
         env: &Env,
         shutdown: CancellationToken,
     ) -> anyhow::Result<()> {
-        let inflight_body_fut = ThroughputClient::download()
-            .new_connection(ConnectionType::H2)
-            .send(
-                self.config.small_download_url.as_str().parse()?,
-                Arc::clone(&env.network),
-                Arc::clone(&env.time),
-                shutdown,
-            )?;
+        let mut client = ThroughputClient::download().new_connection(ConnectionType::H2);
+        if let Some(scoped_headers) = self.config.scoped_headers.clone() {
+            client = client.scoped_headers(scoped_headers);
+        }
+
+        let inflight_body_fut = client.send(
+            self.config.small_download_url.as_str().parse()?,
+            Arc::clone(&env.network),
+            Arc::clone(&env.time),
+            shutdown,
+        )?;
 
         tokio::spawn(report_err(
             event_tx.clone(),
@@ -511,14 +519,17 @@ impl Responsiveness {
             return Ok(false);
         };
 
-        let inflight_body_fut = ThroughputClient::download()
-            .with_connection(connection)
-            .send(
-                self.config.small_download_url.as_str().parse()?,
-                Arc::clone(&env.network),
-                Arc::clone(&env.time),
-                shutdown,
-            )?;
+        let mut client = ThroughputClient::download().with_connection(connection);
+        if let Some(scoped_headers) = self.config.scoped_headers.clone() {
+            client = client.scoped_headers(scoped_headers);
+        }
+
+        let inflight_body_fut = client.send(
+            self.config.small_download_url.as_str().parse()?,
+            Arc::clone(&env.network),
+            Arc::clone(&env.time),
+            shutdown,
+        )?;
 
         tokio::spawn(report_err(
             event_tx.clone(),

@@ -7,7 +7,7 @@ use anyhow::Context;
 use http::Request;
 use http_body_util::BodyExt;
 use nq_core::Network;
-use nq_core::{ConnectionType, Time, Timestamp};
+use nq_core::{ConnectionType, ScopedHeaders, Time, Timestamp};
 use nq_stats::TimeSeries;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -17,6 +17,9 @@ use url::Url;
 pub struct LatencyConfig {
     pub url: Url,
     pub runs: usize,
+    /// Headers attached only to requests whose host matches the scope's
+    /// allowlist.
+    pub scoped_headers: Option<ScopedHeaders>,
 }
 
 impl Default for LatencyConfig {
@@ -26,6 +29,7 @@ impl Default for LatencyConfig {
                 .parse()
                 .unwrap(),
             runs: 20,
+            scoped_headers: None,
         }
     }
 }
@@ -94,11 +98,14 @@ impl Latency {
             );
 
             // perform a simple GET to do some amount of work
+            let mut request = Request::get(url.as_str()).body(Default::default())?;
+            if let Some(scoped_headers) = &self.config.scoped_headers {
+                let request_uri = request.uri().clone();
+                scoped_headers.apply(&request_uri, request.headers_mut());
+            }
+
             let response = network
-                .send_request(
-                    connection,
-                    Request::get(url.as_str()).body(Default::default())?,
-                )
+                .send_request(connection, request)
                 .await
                 .context("GET request failed")?;
 

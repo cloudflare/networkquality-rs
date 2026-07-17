@@ -26,8 +26,12 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let conn_type = args.conn_type.into();
     info!("downloading: {}", args.url);
 
-    let inflight_body = ThroughputClient::download()
-        .new_connection(conn_type)
+    let mut client = ThroughputClient::download().new_connection(conn_type);
+    if let Some(scoped_headers) = crate::access::cf_access_scoped_headers()? {
+        client = client.scoped_headers(scoped_headers);
+    }
+
+    let inflight_body = client
         .send(
             args.url.parse().context("parsing download url")?,
             Arc::clone(&network),
@@ -107,9 +111,14 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
         info!("added header: {key}");
     }
 
-    let inflight_body = ThroughputClient::upload(bytes)
+    let mut client = ThroughputClient::upload(bytes)
         .new_connection(conn_type)
-        .headers(headers)
+        .headers(headers);
+    if let Some(scoped_headers) = crate::access::cf_access_scoped_headers()? {
+        client = client.scoped_headers(scoped_headers);
+    }
+
+    let inflight_body = client
         .send(
             args.url.parse()?,
             Arc::clone(&network),

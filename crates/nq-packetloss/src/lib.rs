@@ -9,7 +9,7 @@
 
 mod webrtc_data_channel;
 
-use nq_core::{ConnectionType, Network, Time, TokioTime, client::Direction};
+use nq_core::{ConnectionType, Network, ScopedHeaders, Time, TokioTime, client::Direction};
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,9 @@ pub struct PacketLossConfig {
     pub download_url: Url,
     /// Upload URL to use for for the [`LoadGenerator`]
     pub upload_url: Url,
+    /// Headers attached only to requests whose host matches the scope's
+    /// allowlist.
+    pub scoped_headers: Option<ScopedHeaders>,
 }
 
 impl Default for PacketLossConfig {
@@ -53,6 +56,7 @@ impl Default for PacketLossConfig {
                 .parse()
                 .unwrap(),
             upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            scoped_headers: None,
         }
     }
 }
@@ -61,6 +65,7 @@ impl PacketLossConfig {
     pub fn load_config(&self) -> LoadConfig {
         LoadConfig {
             headers: HashMap::default(),
+            scoped_headers: self.scoped_headers.clone(),
             download_url: self.download_url.clone(),
             upload_url: self.upload_url.clone(),
             upload_size: 4_000_000_000, // 4 GB
@@ -359,6 +364,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            scoped_headers: None,
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
         let packet_loss_result = packet_loss
@@ -465,6 +471,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            scoped_headers: None,
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
 

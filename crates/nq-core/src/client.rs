@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, trace};
 
 use crate::{
-    ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
+    ConnectionType, EstablishedConnection, Network, OneshotResult, ScopedHeaders, Time, Timestamp,
     body::{BodyEvent, CountingBody, InflightBody, NqBody, UploadBody, empty},
     oneshot_result,
 };
@@ -49,6 +49,7 @@ pub struct ThroughputClient {
     connection: Option<Arc<RwLock<EstablishedConnection>>>,
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
+    scoped_headers: Option<ScopedHeaders>,
     direction: Direction,
 }
 
@@ -59,6 +60,7 @@ impl ThroughputClient {
             connection: None,
             new_connection_type: None,
             headers: None,
+            scoped_headers: None,
             direction: Direction::Down,
         }
     }
@@ -69,6 +71,7 @@ impl ThroughputClient {
             connection: None,
             new_connection_type: None,
             headers: None,
+            scoped_headers: None,
             direction: Direction::Up(size),
         }
     }
@@ -88,6 +91,13 @@ impl ThroughputClient {
     /// Set the headers for the upload or download request.
     pub fn headers(mut self, headers: HeaderMap<HeaderValue>) -> Self {
         self.headers = Some(headers);
+        self
+    }
+
+    /// Set headers that are only attached when the request's host matches the
+    /// scope's allowlist. Headers set via [`Self::headers`] take precedence.
+    pub fn scoped_headers(mut self, scoped_headers: ScopedHeaders) -> Self {
+        self.scoped_headers = Some(scoped_headers);
         self
     }
 
@@ -147,6 +157,10 @@ impl ThroughputClient {
                 empty().boxed()
             }
         };
+
+        if let Some(scoped_headers) = self.scoped_headers.take() {
+            scoped_headers.apply(&uri, &mut headers);
+        }
 
         let mut request = http::Request::builder()
             .method(method)
@@ -355,6 +369,7 @@ pub struct Client {
     connection: Option<Arc<RwLock<EstablishedConnection>>>,
     new_connection_type: Option<ConnectionType>,
     headers: Option<HeaderMap>,
+    scoped_headers: Option<ScopedHeaders>,
     method: Option<String>,
 }
 
@@ -374,6 +389,13 @@ impl Client {
     /// Set the headers for the upload or download request.
     pub fn headers(mut self, headers: HeaderMap<HeaderValue>) -> Self {
         self.headers = Some(headers);
+        self
+    }
+
+    /// Set headers that are only attached when the request's host matches the
+    /// scope's allowlist. Headers set via [`Self::headers`] take precedence.
+    pub fn scoped_headers(mut self, scoped_headers: ScopedHeaders) -> Self {
+        self.scoped_headers = Some(scoped_headers);
         self
     }
 
@@ -410,6 +432,10 @@ impl Client {
             .context("could not resolve large download url")?;
 
         let method: http::Method = self.method.as_deref().unwrap_or("GET").parse()?;
+
+        if let Some(scoped_headers) = self.scoped_headers {
+            scoped_headers.apply(&uri, &mut headers);
+        }
 
         let mut request = http::Request::builder()
             .method(method)

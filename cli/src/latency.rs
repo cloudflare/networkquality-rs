@@ -22,6 +22,7 @@ pub async fn run(url: String, runs: usize) -> anyhow::Result<()> {
     let result = run_test(&LatencyConfig {
         url: url.parse()?,
         runs,
+        scoped_headers: crate::access::cf_access_scoped_headers()?,
     })
     .await?;
 
