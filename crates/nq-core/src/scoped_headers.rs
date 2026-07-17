@@ -28,7 +28,16 @@ pub struct ScopedHeaders {
 impl ScopedHeaders {
     /// Create a new [`ScopedHeaders`] from the headers to attach and the list
     /// of allowed domain suffixes.
+    ///
+    /// Suffixes are normalized (lowercased and stripped of any trailing dot) so
+    /// matching in [`allows_host`](Self::allows_host) is case-insensitive and
+    /// tolerant of fully-qualified (trailing-dot) hostnames.
     pub fn new(headers: HeaderMap, allowed_host_suffixes: Vec<String>) -> Self {
+        let allowed_host_suffixes = allowed_host_suffixes
+            .into_iter()
+            .map(|s| s.trim_end_matches('.').to_ascii_lowercase())
+            .collect();
+
         Self {
             headers,
             allowed_host_suffixes,
@@ -37,9 +46,13 @@ impl ScopedHeaders {
 
     /// Returns whether the given host is covered by an allowed suffix, using
     /// strict label-boundary matching.
+    ///
+    /// Matching is case-insensitive (DNS hostnames are case-insensitive) and
+    /// ignores a trailing dot on the host (fully-qualified domain names).
     pub fn allows_host(&self, host: &str) -> bool {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
         self.allowed_host_suffixes.iter().any(|suffix| {
-            host == suffix
+            host == *suffix
                 || (host.len() > suffix.len()
                     && host.ends_with(suffix)
                     && host.as_bytes()[host.len() - suffix.len() - 1] == b'.')
