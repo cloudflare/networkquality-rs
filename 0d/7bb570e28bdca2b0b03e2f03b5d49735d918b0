@@ -1,0 +1,19 @@
+crates/nq-load-generator/src/lib.rs
+  s_a11ccd229cae3e::t_272f6ed4cf8707 10-11,24-27,35,53,75,77-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0d7bb570e28bdca2b0b03e2f03b5d49735d918b0",
+  "prompts": {},
+  "sessions": {
+    "s_a11ccd229cae3e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0995eedbeffeeTvxl1DpR63mJy",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
