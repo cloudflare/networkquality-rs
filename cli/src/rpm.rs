@@ -25,10 +25,12 @@ use crate::util::pretty_secs_to_ms;
 pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     info!("running responsiveness test");
 
+    let scoped_headers = crate::access::cf_access_scoped_headers()?;
+
     let rpm_urls = match cli_config.config.clone() {
         Some(endpoint) => {
             info!("fetching configuration from {endpoint}");
-            let urls = get_rpm_config(endpoint).await?.urls;
+            let urls = get_rpm_config(endpoint, scoped_headers.clone()).await?.urls;
             info!("retrieved configuration urls: {urls:?}");
 
             urls
@@ -53,6 +55,7 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     let rtt_result = crate::latency::run_test(&LatencyConfig {
         url: rpm_urls.small_https_download_url.parse()?,
         runs: 20,
+        scoped_headers: scoped_headers.clone(),
     })
     .await?;
     info!(
@@ -79,6 +82,7 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         max_loaded_connections: cli_config.max_loaded_connections,
         conn_type: ConnectionType::H2,
         determine_load_only: false,
+        scoped_headers,
     };
 
     info!("running download test");
@@ -156,7 +160,10 @@ pub struct RpmUrls {
     https_upload_url: String,
 }
 
-pub async fn get_rpm_config(config_url: String) -> anyhow::Result<RpmServerConfig> {
+pub async fn get_rpm_config(
+    config_url: String,
+    scoped_headers: Option<nq_core::ScopedHeaders>,
+) -> anyhow::Result<RpmServerConfig> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new());
     let network = Arc::new(TokioNetwork::new(
@@ -164,9 +171,12 @@ pub async fn get_rpm_config(config_url: String) -> anyhow::Result<RpmServerConfi
         shutdown.clone(),
     ));
 
-    let response = Client::default()
+    let client = Client::default()
         .new_connection(ConnectionType::H2)
         .method("GET")
+        .scoped_headers(scoped_headers);
+
+    let response = client
         .send(
             config_url.parse().context("parsing rpm config url")?,
             http_body_util::Empty::new(),

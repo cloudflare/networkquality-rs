@@ -30,6 +30,7 @@ pub async fn run(cli_config: SaturateArgs) -> anyhow::Result<()> {
         determine_load_only: true,
         conn_type: cli_config.conn_type.into(),
         test_duration: Duration::from_secs(cli_config.duration),
+        scoped_headers: crate::access::cf_access_scoped_headers()?,
         ..Default::default()
     };
 

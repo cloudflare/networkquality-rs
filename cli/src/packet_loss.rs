@@ -26,6 +26,7 @@ pub async fn run(args: PacketLossArgs) -> anyhow::Result<()> {
         response_wait_time: Duration::from_millis(args.response_wait_time_ms),
         download_url: args.download_url.parse()?,
         upload_url: args.upload_url.parse()?,
+        scoped_headers: crate::access::cf_access_scoped_headers()?,
     };
 
     info!("fetching TURN server credentials");
@@ -58,10 +59,13 @@ async fn fetch_turn_server_creds(
     let mut headers = HeaderMap::new();
     headers.append(hyper::header::HOST, HeaderValue::from_str(host)?);
 
-    let response = Client::default()
+    let client = Client::default()
         .new_connection(ConnectionType::h1())
         .method("GET")
         .headers(headers)
+        .scoped_headers(config.scoped_headers.clone());
+
+    let response = client
         .send(
             request_url.to_string().parse()?,
             http_body_util::Empty::new(),

@@ -1,6 +1,7 @@
 // Copyright (c) 2023-2024 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
+mod access;
 mod aim_report;
 pub(crate) mod args;
 mod latency;

@@ -7,8 +7,8 @@ use anyhow::Context;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{
-    BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, Time, Timestamp,
-    oneshot_result,
+    BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, ScopedHeaders, Time,
+    Timestamp, oneshot_result,
 };
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
@@ -21,6 +21,10 @@ use tracing::Instrument;
 #[derive(Debug, Deserialize)]
 pub struct LoadConfig {
     pub headers: HashMap<String, String>,
+    /// Headers attached only to requests whose host matches the scope's
+    /// allowlist.
+    #[serde(skip)]
+    pub scoped_headers: Option<ScopedHeaders>,
     pub download_url: url::Url,
     pub upload_url: url::Url,
     pub upload_size: usize,
@@ -28,6 +32,7 @@ pub struct LoadConfig {
 
 pub struct LoadGenerator {
     headers: HeaderMap<HeaderValue>,
+    scoped_headers: Option<ScopedHeaders>,
     config: LoadConfig,
     loads: Vec<LoadedConnection>,
 }
@@ -45,6 +50,7 @@ impl LoadGenerator {
 
         Ok(Self {
             headers,
+            scoped_headers: config.scoped_headers.clone(),
             config,
             loads: Vec::new(),
         })
@@ -66,18 +72,20 @@ impl LoadGenerator {
             Direction::Up(size) => ThroughputClient::upload(size),
         };
 
-        let response_fut = client
+        let client = client
             .new_connection(conn_type)
             .headers(self.headers.clone())
-            .send(
-                match direction {
-                    Direction::Up(_) => self.config.upload_url.as_str().parse()?,
-                    Direction::Down => self.config.download_url.as_str().parse()?,
-                },
-                network,
-                time,
-                shutdown,
-            )?;
+            .scoped_headers(self.scoped_headers.clone());
+
+        let response_fut = client.send(
+            match direction {
+                Direction::Up(_) => self.config.upload_url.as_str().parse()?,
+                Direction::Down => self.config.download_url.as_str().parse()?,
+            },
+            network,
+            time,
+            shutdown,
+        )?;
 
         tracing::debug!("got loaded connection response future");
 

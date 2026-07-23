@@ -13,6 +13,7 @@ mod body;
 pub mod client;
 mod connection;
 mod network;
+mod scoped_headers;
 mod time;
 mod upgraded;
 mod util;
@@ -21,6 +22,7 @@ pub use crate::{
     body::{BodyEvent, CountingBody, NqBody},
     connection::{ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection},
     network::Network,
+    scoped_headers::ScopedHeaders,
     time::{Time, Timestamp, TokioTime},
     upgraded::ConnectUpgraded,
     util::{OneshotResult, ResponseFuture, oneshot_result},
