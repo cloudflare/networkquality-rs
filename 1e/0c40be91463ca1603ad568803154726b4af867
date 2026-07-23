@@ -1,0 +1,20 @@
+crates/nq-core/src/body/counting_body.rs
+  s_a11ccd229cae3e::t_c80a6aaeea0446 193
+  s_a11ccd229cae3e::t_e7ade7aca71a36 185-192,194-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1e0c40be91463ca1603ad568803154726b4af867",
+  "prompts": {},
+  "sessions": {
+    "s_a11ccd229cae3e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0995eedbeffeeTvxl1DpR63mJy",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
