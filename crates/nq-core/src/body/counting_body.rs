@@ -182,3 +182,32 @@ where
         self.inner.size_hint()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{TokioTime, body::UploadBody};
+    use http_body_util::BodyExt;
+
+    // Regression test for the upload completion logic: a fully-consumed body
+    // must emit exactly one `Finished` event.
+    #[tokio::test]
+    async fn upload_body_emits_finished() {
+        let size = 512 * 1024;
+        let body = UploadBody::new(size);
+        let time: Arc<dyn Time> = Arc::new(TokioTime::new());
+        let (body, mut events) = CountingBody::new(body, Duration::ZERO, time);
+
+        body.collect().await.unwrap();
+        events.close();
+
+        let mut got_finished = false;
+        while let Some(ev) = events.recv().await {
+            if matches!(ev, BodyEvent::Finished { .. }) {
+                assert!(!got_finished, "duplicate Finished");
+                got_finished = true;
+            }
+        }
+        assert!(got_finished, "never received Finished");
+    }
+}
