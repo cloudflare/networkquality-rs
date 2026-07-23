@@ -448,10 +448,9 @@ impl Responsiveness {
         env: &Env,
         shutdown: CancellationToken,
     ) -> anyhow::Result<()> {
-        let mut client = ThroughputClient::download().new_connection(ConnectionType::H2);
-        if let Some(scoped_headers) = self.config.scoped_headers.clone() {
-            client = client.scoped_headers(scoped_headers);
-        }
+        let client = ThroughputClient::download()
+            .new_connection(ConnectionType::H2)
+            .scoped_headers(self.config.scoped_headers.clone());
 
         let inflight_body_fut = client.send(
             self.config.small_download_url.as_str().parse()?,
@@ -519,10 +518,9 @@ impl Responsiveness {
             return Ok(false);
         };
 
-        let mut client = ThroughputClient::download().with_connection(connection);
-        if let Some(scoped_headers) = self.config.scoped_headers.clone() {
-            client = client.scoped_headers(scoped_headers);
-        }
+        let client = ThroughputClient::download()
+            .with_connection(connection)
+            .scoped_headers(self.config.scoped_headers.clone());
 
         let inflight_body_fut = client.send(
             self.config.small_download_url.as_str().parse()?,

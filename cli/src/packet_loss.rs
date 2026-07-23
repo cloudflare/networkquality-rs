@@ -59,13 +59,11 @@ async fn fetch_turn_server_creds(
     let mut headers = HeaderMap::new();
     headers.append(hyper::header::HOST, HeaderValue::from_str(host)?);
 
-    let mut client = Client::default()
+    let client = Client::default()
         .new_connection(ConnectionType::h1())
         .method("GET")
-        .headers(headers);
-    if let Some(scoped_headers) = config.scoped_headers.clone() {
-        client = client.scoped_headers(scoped_headers);
-    }
+        .headers(headers)
+        .scoped_headers(config.scoped_headers.clone());
 
     let response = client
         .send(

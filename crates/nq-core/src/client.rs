@@ -96,8 +96,8 @@ impl ThroughputClient {
 
     /// Set headers that are only attached when the request's host matches the
     /// scope's allowlist. Headers set via [`Self::headers`] take precedence.
-    pub fn scoped_headers(mut self, scoped_headers: ScopedHeaders) -> Self {
-        self.scoped_headers = Some(scoped_headers);
+    pub fn scoped_headers(mut self, scoped_headers: Option<ScopedHeaders>) -> Self {
+        self.scoped_headers = scoped_headers;
         self
     }
 
@@ -394,8 +394,8 @@ impl Client {
 
     /// Set headers that are only attached when the request's host matches the
     /// scope's allowlist. Headers set via [`Self::headers`] take precedence.
-    pub fn scoped_headers(mut self, scoped_headers: ScopedHeaders) -> Self {
-        self.scoped_headers = Some(scoped_headers);
+    pub fn scoped_headers(mut self, scoped_headers: Option<ScopedHeaders>) -> Self {
+        self.scoped_headers = scoped_headers;
         self
     }
 

@@ -26,10 +26,9 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let conn_type = args.conn_type.into();
     info!("downloading: {}", args.url);
 
-    let mut client = ThroughputClient::download().new_connection(conn_type);
-    if let Some(scoped_headers) = crate::access::cf_access_scoped_headers()? {
-        client = client.scoped_headers(scoped_headers);
-    }
+    let client = ThroughputClient::download()
+        .new_connection(conn_type)
+        .scoped_headers(crate::access::cf_access_scoped_headers()?);
 
     let inflight_body = client
         .send(
@@ -111,12 +110,10 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
         info!("added header: {key}");
     }
 
-    let mut client = ThroughputClient::upload(bytes)
+    let client = ThroughputClient::upload(bytes)
         .new_connection(conn_type)
-        .headers(headers);
-    if let Some(scoped_headers) = crate::access::cf_access_scoped_headers()? {
-        client = client.scoped_headers(scoped_headers);
-    }
+        .headers(headers)
+        .scoped_headers(crate::access::cf_access_scoped_headers()?);
 
     let inflight_body = client
         .send(

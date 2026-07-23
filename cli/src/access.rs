@@ -1,21 +1,20 @@
 // Copyright (c) 2023-2024 Cloudflare, Inc.
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
-//! Cloudflare Access support for testing internal/staging endpoints.
+//! Cloudflare Access support for testing gated endpoints.
 //!
-//! When the `MACH_CF_ACCESS_TOKEN` environment variable is set, mach attaches a
+//! When the `_MACH_CF_ACCESS_TOKEN` environment variable is set, mach attaches a
 //! `cf-access-token` header to its test requests so that Cloudflare
-//! Access-gated hosts (such as the staging speed test endpoints) can be
-//! reached. The token is only ever attached to hosts on the allowlist below so
-//! that it is never leaked to an unrelated origin returned by a remote
-//! configuration.
+//! Access-gated hosts can be reached. The token is only ever attached to hosts
+//! on the allowlist below so that it is never leaked to an unrelated origin
+//! returned by a remote configuration.
 
 use anyhow::Context;
 use http::{HeaderMap, HeaderValue};
 use nq_core::ScopedHeaders;
 
 /// Environment variable holding the Cloudflare Access token.
-const ACCESS_TOKEN_ENV: &str = "MACH_CF_ACCESS_TOKEN";
+const ACCESS_TOKEN_ENV: &str = "_MACH_CF_ACCESS_TOKEN";
 
 /// Header used to carry the Cloudflare Access token.
 const ACCESS_TOKEN_HEADER: &str = "cf-access-token";
@@ -25,7 +24,7 @@ const ACCESS_TOKEN_HEADER: &str = "cf-access-token";
 const ALLOWED_HOST_SUFFIXES: &[&str] = &["speed.cloudflare.com"];
 
 /// Build the scoped headers carrying the Cloudflare Access token, if the
-/// `MACH_CF_ACCESS_TOKEN` environment variable is set to a non-empty value.
+/// `_MACH_CF_ACCESS_TOKEN` environment variable is set to a non-empty value.
 ///
 /// Returns `Ok(None)` when the variable is unset or blank. Returns an error
 /// when the token is not a valid header value, so a misconfigured token fails

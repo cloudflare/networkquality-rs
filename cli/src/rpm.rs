@@ -171,12 +171,10 @@ pub async fn get_rpm_config(
         shutdown.clone(),
     ));
 
-    let mut client = Client::default()
+    let client = Client::default()
         .new_connection(ConnectionType::H2)
-        .method("GET");
-    if let Some(scoped_headers) = scoped_headers {
-        client = client.scoped_headers(scoped_headers);
-    }
+        .method("GET")
+        .scoped_headers(scoped_headers);
 
     let response = client
         .send(

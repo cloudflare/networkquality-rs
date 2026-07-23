@@ -108,36 +108,6 @@ information on what's happening internally, run mach with `RUST_LOG=info` set.
 RUST_LOG=info mach
 ```
 
-## Testing Cloudflare internal/staging endpoints
-
-> This feature is intended for Cloudflare-internal use. It allows `mach` to test
-> speed test endpoints that are gated behind Cloudflare Access, such as the
-> staging responsiveness servers.
-
-Set the `MACH_CF_ACCESS_TOKEN` environment variable to a valid Cloudflare Access
-service token. When set, `mach` attaches a `cf-access-token` header to its test
-requests so the Access-gated host lets them through:
-
-```shell
-MACH_CF_ACCESS_TOKEN="<token>" \
-  mach rpm -c https://staging.speed.cloudflare.com/responsiveness/api/v1/config
-```
-
-The token is only ever sent to hosts under `speed.cloudflare.com` (matched on
-strict domain-label boundaries). It is never attached to an unrelated origin,
-even if a remote configuration returns URLs pointing elsewhere. This scoping
-applies across the `rpm`, `download`, `upload`, `saturate`, `rtt`, and
-`packet-loss` subcommands.
-
-Notes:
-
-- An unset or blank `MACH_CF_ACCESS_TOKEN` is ignored (no header is sent). An
-  invalid token value fails fast at startup.
-- Headers passed explicitly with `-H` take precedence and are never overwritten
-  by the scoped token.
-- The token value is marked sensitive and is redacted (printed as `Sensitive`)
-  in `mach`'s request/response debug logs.
-
 # Architecture
 
 The main complexity in the repo is due to the `Network` and `Time` trait

@@ -72,13 +72,10 @@ impl LoadGenerator {
             Direction::Up(size) => ThroughputClient::upload(size),
         };
 
-        let mut client = client
+        let client = client
             .new_connection(conn_type)
-            .headers(self.headers.clone());
-
-        if let Some(scoped_headers) = self.scoped_headers.clone() {
-            client = client.scoped_headers(scoped_headers);
-        }
+            .headers(self.headers.clone())
+            .scoped_headers(self.scoped_headers.clone());
 
         let response_fut = client.send(
             match direction {
