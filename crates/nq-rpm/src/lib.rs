@@ -5,7 +5,6 @@ use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     future::Future,
-    ops::Div,
     sync::Arc,
     time::Duration,
 };
@@ -611,11 +610,15 @@ impl SelfProbeResults {
     }
 }
 
-/// The responsiveness is then calculated as the weighted mean:
+/// Responsiveness per draft-ietf-ippm-responsiveness-09 §5.3.1.1 (TLS-enabled
+/// case): convert each side to RPM first, then take the arithmetic mean of the
+/// two RPMs.
 ///
-/// Responsiveness = 60000 /
-/// (1/6*(TM(tcp_f) + TM(tls_f) + TM(http_f)) + 1/2*TM(http_s))
-/// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3.1-4
+///   Foreign_Responsiveness = 60000 / ((TM(tcp_f) + TM(tls_f) + TM(http_f)) / 3)
+///   Loaded_Responsiveness  = 60000 / TM(http_l)
+///   Responsiveness         = (Foreign_Responsiveness + Loaded_Responsiveness) / 2
+///
+/// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.3.1.1
 fn compute_responsiveness(
     foreign_results: &ForeignProbeResults,
     self_results: &SelfProbeResults,
@@ -628,11 +631,23 @@ fn compute_responsiveness(
     let tcp_f = tm(foreign_results.connect())?;
     let tls_f = tm(foreign_results.secure())?;
     let http_f = tm(foreign_results.http())?;
-    let http_s = tm(self_results.http())?;
+    let http_l = tm(self_results.http())?;
 
-    let foreign_sum = tcp_f + tls_f + http_f;
+    // Mean foreign round-trip time and loaded round-trip time, in milliseconds.
+    let foreign_rtt = (tcp_f + tls_f + http_f) / 3.0;
+    let loaded_rtt = http_l;
 
-    Some(60_000.0 / (foreign_sum.div(6.0) + http_s.div(2.0)))
+    // Guard against non-positive RTTs, which would produce a non-finite RPM.
+    if foreign_rtt <= 0.0 || loaded_rtt <= 0.0 {
+        return None;
+    }
+
+    let foreign_rpm = 60_000.0 / foreign_rtt;
+    let loaded_rpm = 60_000.0 / loaded_rtt;
+
+    let responsiveness = (foreign_rpm + loaded_rpm) / 2.0;
+
+    responsiveness.is_finite().then_some(responsiveness)
 }
 
 #[derive(Debug)]
@@ -705,5 +720,98 @@ impl Display for ResponsivenessResult {
             format_size(self.capacity as usize, custom_options)
         )?;
         write!(f, "{:>8}: {}", "rpm", self.rpm.round() as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn ms(v: f64) -> Duration {
+        Duration::from_secs_f64(v / 1000.0)
+    }
+
+    /// Build foreign/self probe series with `n` identical samples for the given
+    /// per-phase latencies (in milliseconds), returning the results plus a
+    /// [from, to] window that covers all samples.
+    fn series(
+        tcp_ms: f64,
+        tls_ms: f64,
+        http_f_ms: f64,
+        http_l_ms: f64,
+    ) -> (ForeignProbeResults, SelfProbeResults, Timestamp, Timestamp) {
+        let start = Timestamp::now();
+        let mut foreign = ForeignProbeResults::default();
+        let mut selfp = SelfProbeResults::default();
+
+        for i in 0..10u64 {
+            let at = start + Duration::from_millis(i);
+            foreign.add(ForeignProbeResult {
+                start: at,
+                time_connect: ms(tcp_ms),
+                time_secure: ms(tls_ms),
+                time_body: ms(http_f_ms),
+            });
+            selfp.add(SelfProbeResult {
+                start: at,
+                time_body: ms(http_l_ms),
+            });
+        }
+
+        (foreign, selfp, start, start + Duration::from_millis(100))
+    }
+
+    /// The old draft-03 harmonic combination, kept here only to prove the new
+    /// formula reports a higher (less biased) value.
+    fn draft03(tcp: f64, tls: f64, http_f: f64, http_l: f64) -> f64 {
+        let foreign_sum = tcp + tls + http_f;
+        60_000.0 / (foreign_sum / 6.0 + http_l / 2.0)
+    }
+
+    #[test]
+    fn arithmetic_mean_of_the_two_rpms() {
+        // F = (30+30+30)/3 = 30 -> foreign_rpm = 2000
+        // L = 30            -> loaded_rpm  = 2000
+        // responsiveness    = (2000 + 2000) / 2 = 2000
+        let (f, s, from, to) = series(30.0, 30.0, 30.0, 30.0);
+        let rpm = compute_responsiveness(&f, &s, from, to, 0.95).unwrap();
+        assert!((rpm - 2000.0).abs() < 1e-6, "got {rpm}");
+    }
+
+    #[test]
+    fn equals_draft03_only_when_foreign_equals_loaded() {
+        // When F == L the arithmetic and harmonic means coincide.
+        let (f, s, from, to) = series(30.0, 30.0, 30.0, 30.0);
+        let rpm = compute_responsiveness(&f, &s, from, to, 0.95).unwrap();
+        assert!((rpm - draft03(30.0, 30.0, 30.0, 30.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reports_higher_than_draft03_when_rtts_diverge() {
+        // Foreign RTT (60ms) slower than loaded RTT (20ms): AM > HM.
+        // new: (60000/60 + 60000/20)/2 = (1000 + 3000)/2 = 2000
+        // old: 60000/((180/6) + (20/2)) = 60000/40 = 1500
+        let (f, s, from, to) = series(60.0, 60.0, 60.0, 20.0);
+        let rpm = compute_responsiveness(&f, &s, from, to, 0.95).unwrap();
+        let old = draft03(60.0, 60.0, 60.0, 20.0);
+        assert!((rpm - 2000.0).abs() < 1e-6, "got {rpm}");
+        assert!(rpm > old, "new {rpm} should exceed draft-03 {old}");
+    }
+
+    #[test]
+    fn returns_none_without_samples() {
+        let f = ForeignProbeResults::default();
+        let s = SelfProbeResults::default();
+        let start = Timestamp::now();
+        let to = start + Duration::from_millis(100);
+        assert!(compute_responsiveness(&f, &s, start, to, 0.95).is_none());
+    }
+
+    #[test]
+    fn returns_none_on_zero_rtt() {
+        // Degenerate all-zero latencies must not yield a non-finite RPM.
+        let (f, s, from, to) = series(0.0, 0.0, 0.0, 0.0);
+        assert!(compute_responsiveness(&f, &s, from, to, 0.95).is_none());
     }
 }
