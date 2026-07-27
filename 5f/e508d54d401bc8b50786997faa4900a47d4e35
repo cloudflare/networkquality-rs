@@ -1,0 +1,20 @@
+crates/nq-rpm/src/lib.rs
+  s_109a0dd8494e51::t_21c8f3d1957922 613-615,617-621,634-643,645-646,648-650
+  s_109a0dd8494e51::t_087fb132b869fb 725-817
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5fe508d54d401bc8b50786997faa4900a47d4e35",
+  "prompts": {},
+  "sessions": {
+    "s_109a0dd8494e51": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07002c644ffePs1l2FC90rWYxm",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
