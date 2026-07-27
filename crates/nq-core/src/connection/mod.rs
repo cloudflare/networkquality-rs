@@ -76,6 +76,14 @@ pub struct ConnectionTiming {
 
     // Duration of the DNS lookup
     dns_time: Duration,
+
+    /// Number of round-trips the TLS handshake took until the connection was
+    /// ready to transmit data (TLS 1.3 -> 1, TLS 1.2 -> 2). Defaults to 1.
+    ///
+    /// Used to normalize the TLS handshake time per draft-ietf-ippm-
+    /// responsiveness-09 §5.3 ("the TLS establishment time needs to be
+    /// normalized to the number of round-trips").
+    tls_round_trips: u32,
 }
 
 impl ConnectionTiming {
@@ -88,6 +96,7 @@ impl ConnectionTiming {
             time_secure: Duration::ZERO,
             time_application: Duration::ZERO,
             dns_time: Duration::ZERO,
+            tls_round_trips: 1,
         }
     }
 
@@ -144,5 +153,98 @@ impl ConnectionTiming {
     /// Returns how long it took for the H/{1,2,3} handshake to complete.
     pub fn time_application(&self) -> Duration {
         self.time_application
+    }
+
+    /// Sets the number of round-trips the TLS handshake took.
+    pub fn set_tls_round_trips(&mut self, round_trips: u32) {
+        self.tls_round_trips = round_trips.max(1);
+    }
+
+    /// Returns the number of round-trips the TLS handshake took (>= 1).
+    pub fn tls_round_trips(&self) -> u32 {
+        self.tls_round_trips.max(1)
+    }
+
+    /// The duration of the TCP handshake alone (excluding DNS resolution),
+    /// i.e. `tcp_f` in draft-ietf-ippm-responsiveness-09 §5.3.
+    ///
+    /// This is the interval between the transport starting to connect and the
+    /// connection being established. When the connection timing starts after
+    /// DNS resolution (as it does for the responsiveness probes), `time_lookup`
+    /// is zero and this is simply `time_connect`.
+    pub fn tcp_handshake(&self) -> Duration {
+        self.time_connect.saturating_sub(self.time_lookup)
+    }
+
+    /// The duration of the TLS handshake alone (excluding the preceding TCP
+    /// handshake), i.e. the un-normalized `tls_f` in
+    /// draft-ietf-ippm-responsiveness-09 §5.3.
+    ///
+    /// For QUIC/H3 connections `time_secure` is zero (TLS is folded into the
+    /// transport handshake), so this saturates to zero rather than underflowing.
+    /// Divide by [`Self::tls_round_trips`] to obtain the normalized value.
+    pub fn tls_handshake(&self) -> Duration {
+        self.time_secure.saturating_sub(self.time_connect)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a timing whose phases complete at the given millisecond offsets
+    /// from `start`.
+    fn timing_at(lookup_ms: u64, connect_ms: u64, secure_ms: u64, application_ms: u64) -> ConnectionTiming {
+        let start = Timestamp::now();
+        let mut t = ConnectionTiming::new(start);
+        t.set_lookup(start + Duration::from_millis(lookup_ms));
+        t.set_connect(start + Duration::from_millis(connect_ms));
+        t.set_secure(start + Duration::from_millis(secure_ms));
+        t.set_application(start + Duration::from_millis(application_ms));
+        t
+    }
+
+    #[test]
+    fn independent_phase_deltas() {
+        // Post-DNS baseline (lookup = 0): connect at 30ms, secure at 60ms,
+        // application at 62ms. Each network phase is ~30ms (1 RTT).
+        let t = timing_at(0, 30, 60, 62);
+        assert_eq!(t.tcp_handshake(), Duration::from_millis(30));
+        assert_eq!(t.tls_handshake(), Duration::from_millis(30));
+    }
+
+    #[test]
+    fn tcp_handshake_excludes_dns_lookup() {
+        // If the timing baseline included DNS (lookup at 10ms, connect at 40ms),
+        // the TCP handshake is connect - lookup = 30ms, not 40ms.
+        let t = timing_at(10, 40, 70, 72);
+        assert_eq!(t.tcp_handshake(), Duration::from_millis(30));
+        assert_eq!(t.tls_handshake(), Duration::from_millis(30));
+    }
+
+    #[test]
+    fn tls_handshake_saturates_for_quic_like_zero_secure() {
+        // QUIC/H3: time_secure stays 0 while time_connect is set. Must not
+        // underflow.
+        let start = Timestamp::now();
+        let mut t = ConnectionTiming::new(start);
+        t.set_connect(start + Duration::from_millis(30));
+        // secure left at zero
+        assert_eq!(t.tls_handshake(), Duration::ZERO);
+    }
+
+    #[test]
+    fn tls_round_trips_defaults_to_one_and_clamps() {
+        let t = ConnectionTiming::new(Timestamp::now());
+        assert_eq!(t.tls_round_trips(), 1);
+
+        let mut t = t;
+        t.set_tls_round_trips(2);
+        assert_eq!(t.tls_round_trips(), 2);
+
+        // A zero round-trip count would produce a divide-by-zero downstream;
+        // it is clamped to 1.
+        t.set_tls_round_trips(0);
+        assert_eq!(t.tls_round_trips(), 1);
     }
 }

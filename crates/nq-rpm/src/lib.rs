@@ -11,7 +11,7 @@ use std::{
 
 use humansize::{DECIMAL, format_size};
 use nq_core::{
-    ConnectionType, Network, ScopedHeaders, Time, Timestamp,
+    ConnectionTiming, ConnectionType, Network, ScopedHeaders, Time, Timestamp,
     client::{Direction, ThroughputClient, wait_for_finish},
 };
 use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
@@ -469,14 +469,15 @@ impl Responsiveness {
                     anyhow::bail!("a new connection with timing should have been created");
                 };
 
+                let (tcp, tls, http) =
+                    foreign_probe_phases(&connection_timing, finished_result.finished_at);
+
                 if event_tx
                     .send(Event::ForeignProbe(ForeignProbeResult {
                         start: connection_timing.start(),
-                        time_connect: connection_timing.time_connect(),
-                        time_secure: connection_timing.time_secure(),
-                        time_body: finished_result
-                            .finished_at
-                            .duration_since(connection_timing.start()),
+                        tcp,
+                        tls,
+                        http,
                     }))
                     .await
                     .is_err()
@@ -574,11 +575,11 @@ pub struct ForeignProbeResults {
 impl ForeignProbeResults {
     pub fn add(&mut self, result: ForeignProbeResult) {
         self.connect
-            .add(result.start, result.time_connect.as_secs_f64() * 1000.0);
+            .add(result.start, result.tcp.as_secs_f64() * 1000.0);
         self.secure
-            .add(result.start, result.time_secure.as_secs_f64() * 1000.0);
+            .add(result.start, result.tls.as_secs_f64() * 1000.0);
         self.http
-            .add(result.start, result.time_body.as_secs_f64() * 1000.0);
+            .add(result.start, result.http.as_secs_f64() * 1000.0);
     }
 
     pub fn connect(&self) -> &TimeSeries {
@@ -652,10 +653,40 @@ fn compute_responsiveness(
 
 #[derive(Debug)]
 pub struct ForeignProbeResult {
+    /// Timestamp used to place the probe within the measurement window.
     start: Timestamp,
-    time_connect: Duration,
-    time_secure: Duration,
-    time_body: Duration,
+    /// TCP handshake duration (`tcp_f`).
+    tcp: Duration,
+    /// TLS handshake duration, normalized to the number of TLS round-trips
+    /// (`tls_f`).
+    tls: Duration,
+    /// HTTP request-issued to full-response-received duration (`http_f`).
+    http: Duration,
+}
+
+/// Computes the three independent foreign-probe phases per
+/// draft-ietf-ippm-responsiveness-09 §5.3:
+///
+/// * `tcp_f`  — the TCP handshake duration (DNS excluded).
+/// * `tls_f`  — the TLS handshake duration, normalized to the number of TLS
+///   round-trips the negotiated version uses.
+/// * `http_f` — the elapsed time between issuing the GET request and receiving
+///   the entire response, derived as `finished_at - (start + time_application)`,
+///   i.e. the interval after the connection is ready to transmit data.
+///
+/// These are deliberately non-overlapping: the earlier draft-03-style code
+/// measured every phase cumulatively from the connection start, which
+/// over-counted the foreign round-trip time (and thus under-reported RPM).
+fn foreign_probe_phases(
+    timing: &ConnectionTiming,
+    finished_at: Timestamp,
+) -> (Duration, Duration, Duration) {
+    let tcp_f = timing.tcp_handshake();
+    let tls_f = timing.tls_handshake() / timing.tls_round_trips();
+    let request_issued = timing.start() + timing.time_application();
+    let http_f = finished_at.duration_since(request_issued);
+
+    (tcp_f, tls_f, http_f)
 }
 
 #[derive(Debug)]
@@ -749,9 +780,9 @@ mod tests {
             let at = start + Duration::from_millis(i);
             foreign.add(ForeignProbeResult {
                 start: at,
-                time_connect: ms(tcp_ms),
-                time_secure: ms(tls_ms),
-                time_body: ms(http_f_ms),
+                tcp: ms(tcp_ms),
+                tls: ms(tls_ms),
+                http: ms(http_f_ms),
             });
             selfp.add(SelfProbeResult {
                 start: at,
@@ -813,5 +844,67 @@ mod tests {
         // Degenerate all-zero latencies must not yield a non-finite RPM.
         let (f, s, from, to) = series(0.0, 0.0, 0.0, 0.0);
         assert!(compute_responsiveness(&f, &s, from, to, 0.95).is_none());
+    }
+
+    /// Build a ConnectionTiming with phases at the given ms offsets from a
+    /// post-DNS baseline, plus a TLS round-trip count.
+    fn conn_timing(
+        connect_ms: u64,
+        secure_ms: u64,
+        application_ms: u64,
+        tls_round_trips: u32,
+    ) -> (ConnectionTiming, Timestamp) {
+        let start = Timestamp::now();
+        let mut t = ConnectionTiming::new(start);
+        t.set_connect(start + Duration::from_millis(connect_ms));
+        t.set_secure(start + Duration::from_millis(secure_ms));
+        t.set_application(start + Duration::from_millis(application_ms));
+        t.set_tls_round_trips(tls_round_trips);
+        (t, start)
+    }
+
+    #[test]
+    fn foreign_phases_are_independent_single_rtt_each() {
+        // connect @30, secure @60, application @62, body finished @92.
+        // tcp_f = 30, tls_f = 30 (1 RT), http_f = 92 - 62 = 30.
+        let (t, start) = conn_timing(30, 60, 62, 1);
+        let finished_at = start + Duration::from_millis(92);
+        let (tcp, tls, http) = foreign_probe_phases(&t, finished_at);
+        assert_eq!(tcp, Duration::from_millis(30));
+        assert_eq!(tls, Duration::from_millis(30));
+        assert_eq!(http, Duration::from_millis(30));
+    }
+
+    #[test]
+    fn foreign_tls_phase_normalized_by_round_trips() {
+        // TLS 1.2 (2 round-trips): raw TLS handshake 60ms -> normalized 30ms.
+        // connect @30, secure @90 (60ms TLS), application @92, finished @122.
+        let (t, start) = conn_timing(30, 90, 92, 2);
+        let finished_at = start + Duration::from_millis(122);
+        let (tcp, tls, http) = foreign_probe_phases(&t, finished_at);
+        assert_eq!(tcp, Duration::from_millis(30));
+        assert_eq!(tls, Duration::from_millis(30)); // 60ms / 2
+        assert_eq!(http, Duration::from_millis(30));
+    }
+
+    #[test]
+    fn foreign_phases_differ_from_cumulative_measurement() {
+        // Proves the fix changed behavior: the old code used cumulative
+        // durations (connect-from-start, secure-from-start, finished-from-start).
+        let (t, start) = conn_timing(30, 60, 62, 1);
+        let finished_at = start + Duration::from_millis(92);
+
+        let (tcp, tls, http) = foreign_probe_phases(&t, finished_at);
+        let new_sum = (tcp + tls + http).as_secs_f64() * 1000.0; // 90ms
+
+        // Old (draft-03-style) cumulative sum.
+        let old_tcp = t.time_connect().as_secs_f64() * 1000.0; // 30
+        let old_tls = t.time_secure().as_secs_f64() * 1000.0; // 60
+        let old_http = finished_at.duration_since(t.start()).as_secs_f64() * 1000.0; // 92
+        let old_sum = old_tcp + old_tls + old_http; // 182
+
+        assert!(new_sum < old_sum, "new {new_sum} should be < old {old_sum}");
+        assert!((new_sum - 90.0).abs() < 1e-6);
+        assert!((old_sum - 182.0).abs() < 1e-6);
     }
 }

@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::bail;
-use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
+use boring::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
 use boring::x509::X509;
 use boring::x509::store::X509StoreBuilder;
 use http::header::HOST;
@@ -120,7 +120,17 @@ pub async fn tls_connection(
 
     timing.set_secure(time.now());
 
-    debug!("created tls connection");
+    // Normalize the TLS handshake time to the number of round-trips the
+    // negotiated version takes (draft-ietf-ippm-responsiveness-09 §5.3).
+    // TLS 1.3 completes in 1 round-trip, TLS 1.2 in 2. Default to 1.
+    let tls_round_trips = match ssl_stream.ssl().version2() {
+        Some(SslVersion::TLS1_3) => 1,
+        Some(SslVersion::TLS1_2) => 2,
+        _ => 1,
+    };
+    timing.set_tls_round_trips(tls_round_trips);
+
+    debug!(tls_round_trips, "created tls connection");
 
     Ok(ssl_stream)
 }
