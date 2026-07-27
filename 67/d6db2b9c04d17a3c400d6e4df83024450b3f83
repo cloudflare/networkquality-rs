@@ -1,0 +1,65 @@
+crates/nq-load-generator/src/lib.rs
+  s_109a0dd8494e51::t_d3747d6d614eaa 104
+  s_109a0dd8494e51::t_216c845707eab5 152,259,272-354,382-396
+  s_109a0dd8494e51::t_617f2d12efd97c 170-172
+  s_109a0dd8494e51::t_5dc359b1606a13 136-139,141,148-151
+  s_109a0dd8494e51::t_9c7dbbb81f2c21 355-381
+  s_109a0dd8494e51::t_b29919d99e881b 159-169,173-182,187-213,233-234,239,248-258,267
+  s_109a0dd8494e51::t_2a53e0399a6011 183-186
+  s_109a0dd8494e51::t_38040b8cc405c0 18
+  s_109a0dd8494e51::t_b2938973bc9a67 244
+  s_109a0dd8494e51::t_77b0afad40eb3b 214-232
+  s_109a0dd8494e51::t_42e2c56bd8f17f 261-263
+  s_109a0dd8494e51::t_1e17fd660daa87 153
+  s_109a0dd8494e51::t_b0277dd4eed875 260
+crates/nq-core/src/body/counting_body.rs
+  s_109a0dd8494e51::t_85d8d007ae59ee 28-40
+  s_109a0dd8494e51::t_52a66836014ef4 191,193-204
+  s_109a0dd8494e51::t_609f3e605dd048 89-99
+  s_109a0dd8494e51::t_7d3576de244c00 250-301
+cli/src/report.rs
+  s_109a0dd8494e51::t_af60f1c1d45f48 54-62,75
+cli/src/args/rpm.rs
+  s_109a0dd8494e51::t_90b236791a1467 69-76
+  s_109a0dd8494e51::t_726175e15fa9ca 115
+  s_109a0dd8494e51::t_c29935c63571f0 6-25
+crates/nq-rpm/src/lib.rs
+  s_109a0dd8494e51::t_e398139c005d8c 112-116,131-132
+  s_109a0dd8494e51::t_23a7958e65a4dd 295-296
+  s_109a0dd8494e51::t_eb147ce19789c6 24-42
+  s_109a0dd8494e51::t_6d34f105cb9f78 250,820-823
+  s_109a0dd8494e51::t_79ea851f59818e 452
+  s_109a0dd8494e51::t_653fb24dc216ea 21
+  s_109a0dd8494e51::t_be9c386aca9c80 435-451,453-491
+  s_109a0dd8494e51::t_6c3d355cd8d601 56-57,93
+cli/src/up_down.rs
+  s_109a0dd8494e51::t_510e54d9a21a60 12
+  s_109a0dd8494e51::t_b417acd26782fa 27-30,97-100
+cli/src/rpm.rs
+  s_109a0dd8494e51::t_726175e15fa9ca 90
+cli/src/args/up_down.rs
+  s_109a0dd8494e51::t_7ed51c931680bc 21-25,48-52
+crates/nq-core/src/client.rs
+  s_109a0dd8494e51::t_4dac456d8fff48 311-319
+  s_109a0dd8494e51::t_25dade7ef0ae42 12
+  s_109a0dd8494e51::t_07b1e4412f5282 179,196-207,209-211
+  s_109a0dd8494e51::t_42e1daa80d2c9c 297-304
+  s_109a0dd8494e51::t_a94c8e0e8c069c 141-145,155
+  s_109a0dd8494e51::t_dd3b91b6fbbf00 549-551
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "67d6db2b9c04d17a3c400d6e4df83024450b3f83",
+  "prompts": {},
+  "sessions": {
+    "s_109a0dd8494e51": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07002c644ffePs1l2FC90rWYxm",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
