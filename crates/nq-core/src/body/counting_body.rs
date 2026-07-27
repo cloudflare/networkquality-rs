@@ -25,6 +25,19 @@ pub enum BodyEvent {
         /// When the body finished.
         at: Timestamp,
     },
+    /// The transfer terminated early with an error and will produce no further
+    /// bytes.
+    ///
+    /// Emitted either by the [`CountingBody`] itself when the wrapped body
+    /// yields an error, or by the client when the request fails or the server
+    /// rejects it (e.g. an HTTP 413 on an upload). Consumers must treat this as
+    /// terminal: the transfer did *not* complete.
+    Failed {
+        /// When the failure was observed.
+        at: Timestamp,
+        /// Human-readable cause, e.g. `"unexpected status 413 Payload Too Large"`.
+        reason: String,
+    },
 }
 
 pin_project_lite::pin_project! {
@@ -72,6 +85,17 @@ impl<B> CountingBody<B> {
             },
             events_rx,
         )
+    }
+
+    /// A handle for reporting a failure the body itself cannot observe, such as
+    /// an upload rejected by the server with a non-success status.
+    ///
+    /// The returned sender must be dropped as soon as it is no longer needed.
+    /// [`CountingBody`] is otherwise the sole owner of the sender, and
+    /// consumers rely on the channel closing when the body is dropped to detect
+    /// a transfer that died without reporting anything.
+    pub fn sender(&self) -> mpsc::UnboundedSender<BodyEvent> {
+        self.events_tx.clone()
     }
 }
 
@@ -164,7 +188,20 @@ where
                 Poll::Ready(None)
             }
             Poll::Ready(Some(Err(e))) => {
+                let now = this.time.now();
                 error!(error=?e, "body errored");
+
+                // Report the failure so consumers retire this transfer instead
+                // of leaving it looking permanently in-flight. Only emitted
+                // once, and never after a `Finished`.
+                if !*this.sent_finished {
+                    let _ = this.events_tx.send(BodyEvent::Failed {
+                        at: now,
+                        reason: format!("body error: {e:?}"),
+                    });
+                    *this.sent_finished = true;
+                }
+
                 Poll::Ready(Some(Err(e)))
             }
             Poll::Pending => {
@@ -209,5 +246,57 @@ mod tests {
             }
         }
         assert!(got_finished, "never received Finished");
+    }
+
+    /// A body that yields one data frame and then errors, standing in for a
+    /// transfer killed mid-flight (reset stream, dropped connection).
+    struct ErroringBody {
+        sent: bool,
+    }
+
+    impl Body for ErroringBody {
+        type Data = Bytes;
+        type Error = &'static str;
+
+        fn poll_frame(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+            if !self.sent {
+                self.sent = true;
+                return Poll::Ready(Some(Ok(hyper::body::Frame::data(Bytes::from_static(
+                    b"hello",
+                )))));
+            }
+            Poll::Ready(Some(Err("stream reset")))
+        }
+    }
+
+    // A body that dies mid-transfer must report `Failed`, otherwise consumers
+    // cannot distinguish it from one that is still running.
+    #[tokio::test]
+    async fn errored_body_emits_failed() {
+        let time: Arc<dyn Time> = Arc::new(TokioTime::new());
+        let (body, mut events) = CountingBody::new(ErroringBody { sent: false }, Duration::ZERO, time);
+
+        // Drive the body until it errors.
+        let _ = body.collect().await;
+        events.close();
+
+        let mut failed = None;
+        let mut got_finished = false;
+        while let Some(ev) = events.recv().await {
+            match ev {
+                BodyEvent::Failed { reason, .. } => failed = Some(reason),
+                BodyEvent::Finished { .. } => got_finished = true,
+                BodyEvent::ByteCount { .. } => {}
+            }
+        }
+
+        assert!(failed.is_some(), "never received Failed");
+        assert!(
+            !got_finished,
+            "a failed body must not also report Finished"
+        );
     }
 }

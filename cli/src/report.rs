@@ -51,6 +51,15 @@ struct RpmReport {
     throughput: usize,
     loaded_latency_ms: f64,
     rpm: usize,
+    /// Load-generating connections that terminated early with an error.
+    /// Non-zero means the link was not fully loaded for part of the run, so
+    /// this result is degraded and should not be compared with a clean one.
+    #[serde(skip_serializing_if = "is_zero")]
+    failed_connections: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 impl RpmReport {
@@ -63,6 +72,7 @@ impl RpmReport {
                 .map(pretty_ms)
                 .context("no loaded latency measurements")?,
             rpm: result.rpm as usize,
+            failed_connections: result.failed_connections,
         })
     }
 }

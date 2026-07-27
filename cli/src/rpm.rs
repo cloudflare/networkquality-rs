@@ -87,6 +87,7 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         max_loaded_connections: cli_config.max_loaded_connections,
         conn_type: ConnectionType::H2,
         determine_load_only: false,
+        on_connection_error: cli_config.on_connection_error.into(),
         scoped_headers,
     };
 
