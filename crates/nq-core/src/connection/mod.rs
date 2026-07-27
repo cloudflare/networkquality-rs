@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::Timestamp;
 
-pub use self::http::EstablishedConnection;
+pub use self::http::{EstablishedConnection, insecure_tls, set_insecure_tls};
 pub use self::map::ConnectionManager;
 
 /// The L7 type of a connection.

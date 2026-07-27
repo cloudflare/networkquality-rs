@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::bail;
 use boring::ssl::{SslConnector, SslMethod, SslVerifyMode};
@@ -24,6 +25,23 @@ use crate::util::ByteStream;
 use crate::{ConnectionTiming, ConnectionType, ResponseFuture, Time};
 
 pub type TlsStream = tokio_boring::SslStream<Box<dyn ByteStream>>;
+
+/// Process-wide switch to skip TLS certificate verification. Off by default.
+///
+/// This exists only to allow testing against servers presenting self-signed
+/// certificates (e.g. a local `wrangler dev` speed-test server). It must never
+/// be enabled against production endpoints.
+static INSECURE_TLS: AtomicBool = AtomicBool::new(false);
+
+/// Enable or disable skipping TLS certificate verification globally.
+pub fn set_insecure_tls(insecure: bool) {
+    INSECURE_TLS.store(insecure, Ordering::Relaxed);
+}
+
+/// Whether TLS certificate verification is currently being skipped.
+pub fn insecure_tls() -> bool {
+    INSECURE_TLS.load(Ordering::Relaxed)
+}
 
 /// An [`EstablishedConnection`] contains the connection's timing and a handle
 /// to send HTTP requests with.
@@ -77,7 +95,12 @@ pub async fn tls_connection(
         }
     }
     builder.set_verify_cert_store(store_builder.build())?;
-    builder.set_verify(SslVerifyMode::PEER);
+    if insecure_tls() {
+        debug!("TLS certificate verification disabled (insecure mode)");
+        builder.set_verify(SslVerifyMode::NONE);
+    } else {
+        builder.set_verify(SslVerifyMode::PEER);
+    }
 
     let alpn: &[u8] = match conn_type {
         ConnectionType::H1 { use_tls: false } => {
@@ -191,29 +214,49 @@ impl SendRequest {
         &mut self,
         mut req: Request<NqBody>,
     ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Incoming>>> + Send>> {
-        // inject the host header it it's missing and this is an HTTP/1.1 req.
-        self.insert_host_if_missing(&mut req);
-
         match self {
             SendRequest::H1 {
                 dispatch: send_request,
-            } => Box::pin(send_request.send_request(req)),
+            } => {
+                // HTTP/1.1 to an origin server requires origin-form request
+                // targets (`GET /path`) plus a `Host` header carrying the
+                // authority. Building the request from an absolute URI leaves
+                // it in proxy/absolute-form (`GET http://host/path`), which
+                // origin servers (e.g. workerd) reject. Normalize here.
+                Self::normalize_h1_request(&mut req);
+                Box::pin(send_request.send_request(req))
+            }
             SendRequest::H2 {
                 dispatch: send_request,
-            } => Box::pin(send_request.send_request(req)),
+            } => {
+                // HTTP/2 uses the :authority pseudo-header derived from the
+                // absolute URI, so leave the request untouched.
+                Box::pin(send_request.send_request(req))
+            }
         }
     }
 
-    fn insert_host_if_missing(&mut self, req: &mut Request<NqBody>) {
-        if !matches!(self, SendRequest::H1 { .. }) && !req.headers().contains_key(HOST) {
-            return;
+    /// Rewrite an HTTP/1.1 request into origin-form with a proper `Host` header.
+    fn normalize_h1_request(req: &mut Request<NqBody>) {
+        // Set `Host` from the full authority (host and, if present, port).
+        if !req.headers().contains_key(HOST) {
+            if let Some(authority) = req.uri().authority().cloned() {
+                if let Ok(host) = HeaderValue::from_str(authority.as_str()) {
+                    req.headers_mut().insert(HOST, host);
+                }
+            }
         }
 
-        let Some(Ok(host)) = req.uri().host().map(HeaderValue::from_str) else {
-            return;
-        };
+        // Collapse the request target to origin-form (path + query only).
+        let path_and_query = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_owned())
+            .unwrap_or_else(|| "/".to_owned());
 
-        req.headers_mut().insert(HOST, host);
+        if let Ok(uri) = path_and_query.parse::<http::Uri>() {
+            *req.uri_mut() = uri;
+        }
     }
 }
 

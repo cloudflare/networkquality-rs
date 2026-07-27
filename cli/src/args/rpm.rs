@@ -42,6 +42,11 @@ pub struct RpmArgs {
         default_value = "https://h3.speed.cloudflare.com/__up"
     )]
     pub upload_url: String,
+    /// Skip TLS certificate verification. Only for testing against servers with
+    /// self-signed certificates (e.g. a local `wrangler dev`). Never use against
+    /// production endpoints.
+    #[clap(long = "insecure", default_value = "false")]
+    pub insecure: bool,
     /// The number of intervals to use when calculating the moving average.
     #[clap(long = "mad", default_value = "4")]
     pub moving_average_distance: usize,
@@ -79,6 +84,7 @@ impl Default for RpmArgs {
                 .to_string(),
             small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10".to_string(),
             upload_url: "https://h3.speed.cloudflare.com/__up".to_string(),
+            insecure: false,
             moving_average_distance: 4,
             std_tolerance: 0.05,
             trimmed_mean_percent: 0.95,

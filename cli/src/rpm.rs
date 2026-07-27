@@ -27,6 +27,11 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
 
     let scoped_headers = crate::access::cf_access_scoped_headers()?;
 
+    if cli_config.insecure {
+        error!("TLS certificate verification disabled (--insecure); do not use against production");
+        nq_core::set_insecure_tls(true);
+    }
+
     let rpm_urls = match cli_config.config.clone() {
         Some(endpoint) => {
             info!("fetching configuration from {endpoint}");

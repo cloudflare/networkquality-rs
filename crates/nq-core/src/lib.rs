@@ -20,7 +20,10 @@ mod util;
 
 pub use crate::{
     body::{BodyEvent, CountingBody, NqBody},
-    connection::{ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection},
+    connection::{
+        ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection,
+        insecure_tls, set_insecure_tls,
+    },
     network::Network,
     scoped_headers::ScopedHeaders,
     time::{Time, Timestamp, TokioTime},
