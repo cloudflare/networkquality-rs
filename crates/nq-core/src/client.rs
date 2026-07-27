@@ -210,7 +210,7 @@ impl ThroughputClient {
     ) -> Result<Result<(), anyhow::Error>, anyhow::Error> {
         let start = time.now();
         let connection = self
-            .get_or_create_connection(&network, host, host_with_port, start)
+            .get_or_create_connection(&network, &time, host, host_with_port)
             .await?;
         let conn_timing = {
             let conn = connection.read().await;
@@ -305,9 +305,9 @@ impl ThroughputClient {
     async fn get_or_create_connection(
         &mut self,
         network: &Arc<dyn Network>,
+        time: &Arc<dyn Time>,
         host: String,
         host_with_port: String,
-        start: Timestamp,
     ) -> Result<Arc<RwLock<EstablishedConnection>>, anyhow::Error> {
         let connection = if let Some(connection) = self.connection.take() {
             connection
@@ -321,8 +321,13 @@ impl ThroughputClient {
 
             debug!("addrs: {addrs:?}");
 
+            // Start the connection timing *after* DNS resolution so that
+            // tcp_f (draft-ietf-ippm-responsiveness-09 §5.3) measures the TCP
+            // handshake alone, without folding in the DNS lookup time.
+            let connect_start = time.now();
+
             network
-                .new_connection(start, addrs[0], host, conn_type)
+                .new_connection(connect_start, addrs[0], host, conn_type)
                 .await
                 .context("creating new connection")?
         } else {
