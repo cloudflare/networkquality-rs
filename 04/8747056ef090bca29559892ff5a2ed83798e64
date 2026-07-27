@@ -1,0 +1,28 @@
+crates/nq-core/src/connection/http.rs
+  s_109a0dd8494e51::t_f88ce292bfdd3d 98-103
+  s_109a0dd8494e51::t_9e413f5cd4c003 220-228,231-235,239-247,250-255,257-259
+  s_109a0dd8494e51::t_1d5658a165d5b6 8
+  s_109a0dd8494e51::t_a5c4a5c4c1e7c2 29-45
+cli/src/rpm.rs
+  s_109a0dd8494e51::t_422cc291b64c81 30-34
+cli/src/args/rpm.rs
+  s_109a0dd8494e51::t_422cc291b64c81 45-49,87
+crates/nq-core/src/lib.rs
+  s_109a0dd8494e51::t_422cc291b64c81 23-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "048747056ef090bca29559892ff5a2ed83798e64",
+  "prompts": {},
+  "sessions": {
+    "s_109a0dd8494e51": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07002c644ffePs1l2FC90rWYxm",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
