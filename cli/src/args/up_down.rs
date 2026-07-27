@@ -18,6 +18,11 @@ pub struct DownloadArgs {
     pub(crate) conn_type: ConnType,
     #[clap(short = 'H', long = "header")]
     pub(crate) headers: Vec<String>,
+    /// Skip TLS certificate verification. Only for testing against servers with
+    /// self-signed certificates (e.g. a local proxy). Never use against
+    /// production endpoints.
+    #[clap(long = "insecure", default_value = "false")]
+    pub(crate) insecure: bool,
 }
 
 /// Upload data (POST) to an endpoint,  reporting latency measurements and total
@@ -40,4 +45,9 @@ pub struct UploadArgs {
     /// Headers to add to the request.
     #[clap(short = 'H', long = "header")]
     pub(crate) headers: Vec<String>,
+    /// Skip TLS certificate verification. Only for testing against servers with
+    /// self-signed certificates (e.g. a local proxy). Never use against
+    /// production endpoints.
+    #[clap(long = "insecure", default_value = "false")]
+    pub(crate) insecure: bool,
 }

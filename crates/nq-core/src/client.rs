@@ -9,7 +9,7 @@
 use std::{convert::Infallible, net::ToSocketAddrs, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use http::{HeaderMap, HeaderValue, Uri};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Incoming};
@@ -138,6 +138,11 @@ impl ThroughputClient {
 
         let (tx, rx) = oneshot_result();
         let mut events = None;
+        // Lets the request task report a failure the upload body cannot see
+        // itself -- notably a non-success response status. Must be dropped once
+        // the request finishes so the body remains the sole sender and its
+        // channel still closes when the transfer dies.
+        let mut upload_events_tx = None;
 
         let body: NqBody = match self.direction {
             Direction::Up(size) => {
@@ -147,6 +152,7 @@ impl ThroughputClient {
                 let (body, events_rx) =
                     CountingBody::new(dummy_body, Duration::from_millis(50), Arc::clone(&time));
                 events = Some(events_rx);
+                upload_events_tx = Some(body.sender());
 
                 headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
 
@@ -170,6 +176,7 @@ impl ThroughputClient {
         *request.headers_mut() = headers.clone();
         tracing::debug!("created request: {request:?}");
 
+        let failure_time = Arc::clone(&time);
         tokio::spawn(
             async move {
                 if let Err(error) = self
@@ -186,8 +193,22 @@ impl ThroughputClient {
                     )
                     .await
                 {
-                    debug!("error sending ThroughputClient request: {error:#}");
+                    error!("error sending ThroughputClient request: {error:#}");
+
+                    // An upload's failure (rejected status, reset stream, dead
+                    // connection) is invisible to its request body, which just
+                    // stops being polled. Report it explicitly so the transfer
+                    // is retired rather than appearing to run forever.
+                    if let Some(sender) = &upload_events_tx {
+                        let _ = sender.send(BodyEvent::Failed {
+                            at: failure_time.now(),
+                            reason: format!("{error:#}"),
+                        });
+                    }
                 }
+                // Drop the sender clone so the body is again the only owner of
+                // the events channel.
+                drop(upload_events_tx);
             }
             .in_current_span(),
         );
@@ -273,11 +294,28 @@ impl ThroughputClient {
                     .into_parts();
                 info!("upload response parts: {:?}", parts);
 
+                // A rejected upload (e.g. HTTP 413 when the body exceeds the
+                // server's buffering cap) is a perfectly well-formed HTTP
+                // response, so nothing below would otherwise notice: the load
+                // would be counted as healthy while transferring nothing.
+                if !parts.status.is_success() {
+                    bail!("upload rejected with status {}", parts.status);
+                }
+
                 incoming.boxed()
             }
             Direction::Down => {
                 let (parts, incoming) = response_fut.await?.into_parts();
                 info!("download response parts: {:?}", parts);
+
+                // The response is awaited before the caller is handed its
+                // `InflightBody`, so a bad status can be reported through the
+                // oneshot and the load never starts.
+                if !parts.status.is_success() {
+                    let reason = format!("download rejected with status {}", parts.status);
+                    let _ = tx.send(Err(anyhow::anyhow!("{reason}")));
+                    bail!(reason);
+                }
 
                 let (counting_body, events) =
                     CountingBody::new(incoming, Duration::from_millis(100), Arc::clone(&time));
@@ -507,6 +545,9 @@ pub async fn wait_for_finish(
                     total: body_total,
                     finished_at: at,
                 });
+            }
+            BodyEvent::Failed { reason, .. } => {
+                return Err(anyhow::anyhow!("body failed after {body_total} bytes: {reason}"));
             }
         }
     }

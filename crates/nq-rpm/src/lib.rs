@@ -18,8 +18,27 @@ use nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use nq_stats::{TimeSeries, instant_minus_intervals};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, error, info};
+use tracing::{Instrument, debug, error, info, warn};
 use url::Url;
+
+/// What to do when a load-generating connection terminates with an error.
+///
+/// draft-ietf-ippm-responsiveness-09 §5.4 says "if at any point one of these
+/// connections terminates with an error, the test should be aborted". That
+/// "should" is lowercase, so it is advisory rather than a BCP 14 requirement,
+/// and aborting outright is often not the most useful behaviour: a server that
+/// rejects oversized uploads (HTTP 413) would abort every run. The default
+/// therefore retires the failed connection and lets the ramp replace it, while
+/// still recording and reporting the failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConnectionErrorPolicy {
+    /// Retire the failed connection, keep measuring, and report the failure
+    /// count. Aborts only if load can no longer be sustained at all.
+    #[default]
+    Retire,
+    /// Abort the test on the first failure, as the draft literally describes.
+    Abort,
+}
 
 #[derive(Debug, Clone)]
 pub struct ResponsivenessConfig {
@@ -34,6 +53,8 @@ pub struct ResponsivenessConfig {
     pub max_loaded_connections: usize,
     pub conn_type: ConnectionType,
     pub determine_load_only: bool,
+    /// What to do when a load-generating connection terminates with an error.
+    pub on_connection_error: ConnectionErrorPolicy,
     /// Headers attached only to requests whose host matches the scope's
     /// allowlist.
     pub scoped_headers: Option<ScopedHeaders>,
@@ -69,6 +90,7 @@ impl Default for ResponsivenessConfig {
             max_loaded_connections: 16,
             conn_type: ConnectionType::H2,
             determine_load_only: false,
+            on_connection_error: ConnectionErrorPolicy::default(),
             scoped_headers: None,
         }
     }
@@ -87,6 +109,11 @@ pub struct Responsiveness {
     direction: Direction,
     rpm: f64,
     capacity: f64,
+    /// Load-generating connections that terminated early with an error.
+    failed_connections: usize,
+    /// Consecutive intervals that ended with no live load-generating
+    /// connection while failures were occurring.
+    starved_intervals: usize,
 }
 
 impl Responsiveness {
@@ -101,6 +128,8 @@ impl Responsiveness {
             self_probe_results: Default::default(),
             average_goodput_series: TimeSeries::new(),
             rpm_series: TimeSeries::new(),
+            failed_connections: 0,
+            starved_intervals: 0,
             goodput_saturated: false,
             rpm_saturated: false,
             direction: if download {
@@ -218,6 +247,7 @@ impl Responsiveness {
             foreign_loaded_latencies: self.foreign_probe_results.http,
             self_probe_latencies: self.self_probe_results.http,
             loaded_connections: loads,
+            failed_connections: self.failed_connections,
             duration: now.duration_since(self.start),
             average_goodput_series: self.average_goodput_series,
         })
@@ -261,6 +291,8 @@ impl Responsiveness {
             self.config.moving_average_distance,
             self.config.interval_duration,
         );
+
+        self.enforce_connection_error_policy()?;
 
         // always start a load generating connection
         // TODO: only if goodput is not saturated?
@@ -398,6 +430,63 @@ impl Responsiveness {
             .as_secs_f64();
 
         8.0 * bytes_seen / total_time
+    }
+
+    /// Apply [`ConnectionErrorPolicy`] to load-generating connections that
+    /// terminated early.
+    ///
+    /// Implements draft-ietf-ippm-responsiveness-09 §5.4's guidance that the
+    /// test should be aborted when a connection terminates with an error. See
+    /// [`ConnectionErrorPolicy`] for why the default is more forgiving than the
+    /// literal wording.
+    fn enforce_connection_error_policy(&mut self) -> anyhow::Result<()> {
+        let failed = self.load_generator.count_failed_loads();
+        let newly_failed = failed.saturating_sub(self.failed_connections);
+        self.failed_connections = failed;
+
+        if newly_failed > 0 {
+            let reason = self
+                .load_generator
+                .connections()
+                .filter_map(|c| c.failure_reason())
+                .last()
+                .unwrap_or("connection terminated early")
+                .to_owned();
+
+            warn!(
+                newly_failed,
+                total_failed = failed,
+                reason = %reason,
+                "load-generating connection(s) terminated with an error"
+            );
+
+            if self.config.on_connection_error == ConnectionErrorPolicy::Abort {
+                anyhow::bail!(
+                    "aborting test: {failed} load-generating connection(s) terminated with an \
+                     error (most recent: {reason})"
+                );
+            }
+        }
+
+        // Retiring failed connections only helps if the ramp can replace them.
+        // If an interval ends with nothing left transferring while failures are
+        // happening, no load is being generated and any responsiveness figure
+        // would be measured off an idle link -- so refuse to report one.
+        if failed > 0 && self.load_generator.count_loads() == 0 {
+            self.starved_intervals += 1;
+
+            if self.starved_intervals >= 2 {
+                anyhow::bail!(
+                    "aborting test: no load-generating connections could be sustained \
+                     ({failed} terminated with an error); the link was never saturated so a \
+                     responsiveness result would be meaningless"
+                );
+            }
+        } else {
+            self.starved_intervals = 0;
+        }
+
+        Ok(())
     }
 
     /// A GET/POST to an endpoint which sends/receives a large number of bytes
@@ -728,6 +817,10 @@ pub struct ResponsivenessResult {
     pub self_probe_latencies: TimeSeries,
     pub loaded_connections: Vec<LoadedConnection>,
     pub average_goodput_series: TimeSeries,
+    /// Load-generating connections that terminated early with an error. A
+    /// non-zero value means the link was not fully loaded for part of the run,
+    /// so the result is degraded.
+    pub failed_connections: usize,
 }
 
 impl ResponsivenessResult {

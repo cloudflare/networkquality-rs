@@ -3,7 +3,26 @@
 
 //! Arguments for running responsiveness tests.
 
-use clap::Args;
+use clap::{Args, ValueEnum};
+use nq_rpm::ConnectionErrorPolicy;
+
+/// CLI spelling of [`ConnectionErrorPolicy`].
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ConnectionErrorPolicyArg {
+    /// Retire the failed connection and keep measuring.
+    Retire,
+    /// Abort the test on the first failed connection.
+    Abort,
+}
+
+impl From<ConnectionErrorPolicyArg> for ConnectionErrorPolicy {
+    fn from(arg: ConnectionErrorPolicyArg) -> Self {
+        match arg {
+            ConnectionErrorPolicyArg::Retire => ConnectionErrorPolicy::Retire,
+            ConnectionErrorPolicyArg::Abort => ConnectionErrorPolicy::Abort,
+        }
+    }
+}
 
 #[derive(Debug, Args)]
 pub struct RpmArgs {
@@ -47,6 +66,14 @@ pub struct RpmArgs {
     /// production endpoints.
     #[clap(long = "insecure", default_value = "false")]
     pub insecure: bool,
+    /// What to do when a load-generating connection terminates with an error
+    /// (for example an upload rejected with HTTP 413).
+    ///
+    /// `retire` drops the failed connection, lets the ramp replace it, and
+    /// reports how many failed. `abort` stops the test on the first failure,
+    /// which is what draft-ietf-ippm-responsiveness-09 §5.4 literally describes.
+    #[clap(long = "on-connection-error", default_value = "retire")]
+    pub on_connection_error: ConnectionErrorPolicyArg,
     /// The number of intervals to use when calculating the moving average.
     #[clap(long = "mad", default_value = "4")]
     pub moving_average_distance: usize,
@@ -85,6 +112,7 @@ impl Default for RpmArgs {
             small_download_url: "https://h3.speed.cloudflare.com/__down?bytes=10".to_string(),
             upload_url: "https://h3.speed.cloudflare.com/__up".to_string(),
             insecure: false,
+            on_connection_error: ConnectionErrorPolicyArg::Retire,
             moving_average_distance: 4,
             std_tolerance: 0.05,
             trimmed_mean_percent: 0.95,
