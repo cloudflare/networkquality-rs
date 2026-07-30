@@ -77,7 +77,13 @@ impl CloudflareAimResults {
             down_loaded_latency_ms,
             up_loaded_latency_ms,
             packet_loss,
-            responsiveness: download_result.rpm,
+            // This payload has no way to express "not measured", and it is built
+            // before the report is rendered, so it cannot fail the run the way
+            // `RpmReport` does. Hardening the telemetry path is deliberately out
+            // of scope here; in practice `None` now only occurs when no interval
+            // produced a sample at all, which is a broken run rather than the
+            // routine unconverged case that used to report 0.
+            responsiveness: download_result.rpm.unwrap_or(0.0),
             origin: config_url.unwrap_or_else(|| "https://rpm.speed.cloudflare.com".to_string()),
         }
     }

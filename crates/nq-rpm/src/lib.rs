@@ -128,7 +128,17 @@ pub struct Responsiveness {
     goodput_saturated: bool,
     rpm_saturated: bool,
     direction: Direction,
-    rpm: f64,
+    /// The value to report, set once responsiveness saturation is declared.
+    /// `None` until then; see [`Self::last_rpm`] for the unconverged case.
+    rpm: Option<f64>,
+    /// RPM at the most recent interval that actually produced a measurement.
+    ///
+    /// This is the value reported when the test hits its time limit without
+    /// declaring saturation, which for the upload leg is the norm rather than
+    /// the exception. Each sample is already a trimmed mean over the moving
+    /// average window (see [`compute_responsiveness`]), so it is reported as-is
+    /// and must not be averaged a second time.
+    last_rpm: Option<f64>,
     capacity: f64,
     /// Load-generating connections that terminated early with an error.
     failed_connections: usize,
@@ -164,7 +174,8 @@ impl Responsiveness {
             } else {
                 Direction::Up(upload_bytes_per_request)
             },
-            rpm: 0.0,
+            rpm: None,
+            last_rpm: None,
             capacity: 0.0,
         })
     }
@@ -257,12 +268,27 @@ impl Responsiveness {
         }
 
         let now = env.time.now();
-        if self.rpm == 0.0 {
-            self.rpm = self
-                .rpm_series
-                .interval_average(now - Duration::from_secs(2), now)
-                .unwrap_or(0.0);
-        }
+
+        // The loop above exited without responsiveness ever stabilizing, which
+        // happens whenever the time limit is reached first -- the normal outcome
+        // for the upload leg. draft-ietf-ippm-responsiveness-09 §5.4 says to
+        // report the current result in that case rather than nothing, and
+        // "current_responsiveness" means the value at the final interval, not an
+        // average of recent ones: each sample is already a trimmed mean across
+        // the moving average window.
+        //
+        // This deliberately does NOT read a wall-clock window. It used to be
+        // `interval_average(now - 2s, now)`, but samples are stamped with the
+        // computed `start + interval_duration * interval` rather than the time
+        // they were taken, and `on_interval(i)` runs about one interval after the
+        // instant it stamps. The newest sample therefore sat almost exactly 2s
+        // behind `now`, so whether it fell inside the window came down to how
+        // promptly the loop happened to exit. When the exit was ~1s late the
+        // window matched nothing and `unwrap_or(0.0)` reported 0 RPM for an
+        // otherwise healthy run (RADAR-7233 follow-up). Measured on this
+        // harness: 13 of 14 runs exited within a millisecond and squeaked in,
+        // one exited 0.999s later and reported zero.
+        self.rpm = select_reported_rpm(self.rpm, self.last_rpm);
 
         // stop all on-going loads.
         let mut loads = self.load_generator.into_connections();
@@ -348,20 +374,40 @@ impl Responsiveness {
             self.goodput_saturated = true;
         }
 
+        // `None` means this window held no probe measurements at all.
         let current_rpm = compute_responsiveness(
             &self.foreign_probe_results,
             &self.self_probe_results,
             start_data_interval,
             end_data_interval,
             self.config.trimmed_mean_percent,
-        )
-        .unwrap_or(0.0);
+        );
 
-        if current_rpm.is_nan() {
-            panic!("NaN rpm!");
+        // An interval with no probes still contributes a 0.0 sample. That is
+        // arguably wrong on its face, but it is load-bearing and must not be
+        // "cleaned up" in isolation: a 0.0 sitting among values near 340 is a
+        // large outlier that inflates `interval_std`, and that inflation is the
+        // only thing currently preventing responsiveness from being declared
+        // stable during the ramp. Saturation is not gated on goodput saturation
+        // (see the conformance audit), so an early declaration latches
+        // `self.rpm` at a high ramp value and keeps it.
+        //
+        // Measured: dropping these samples made the upload leg latch at interval
+        // 1-2 while throughput_saturated was still false, reporting 593-709 RPM
+        // against a true value near 331 -- roughly double. Removing them
+        // requires gating saturation on goodput first, which is a separate
+        // change with its own validation.
+        //
+        // No NaN check is needed here: `compute_responsiveness` only yields
+        // `Some` for finite values, and 0.0 is finite.
+        let current_rpm_or_zero = current_rpm.unwrap_or(0.0);
+        self.rpm_series.add(end_data_interval, current_rpm_or_zero);
+
+        // Only genuine measurements are eligible to be reported at the end, so a
+        // probe-less final interval cannot surface as "0 RPM".
+        if let Some(current_rpm) = current_rpm {
+            self.last_rpm = Some(current_rpm);
         }
-
-        self.rpm_series.add(end_data_interval, current_rpm);
 
         let std_rpm = self
             .rpm_series
@@ -370,8 +416,11 @@ impl Responsiveness {
         let is_rpm_saturated = if let Some(std_rpm) = std_rpm {
             // RPM is saturated if the std of the last MAD RPMs is
             // within tolerance % of the current_rpm.
-            if std_rpm < current_rpm * self.config.std_tolerance {
-                self.rpm = current_rpm;
+            //
+            // When `current_rpm_or_zero` is 0.0 this is `std_rpm < 0.0`, which is
+            // never true, so a probe-less interval can never latch 0 RPM.
+            if std_rpm < current_rpm_or_zero * self.config.std_tolerance {
+                self.rpm = Some(current_rpm_or_zero);
                 self.rpm_saturated = true;
                 true
             } else {
@@ -386,7 +435,8 @@ impl Responsiveness {
             current_goodput,
             std_goodput,
             goodput_saturated,
-            current_rpm,
+            current_rpm_or_zero,
+            current_rpm.is_some(),
             std_rpm,
             is_rpm_saturated,
         );
@@ -403,6 +453,7 @@ impl Responsiveness {
         std_goodput: f64,
         goodput_saturated: bool,
         current_rpm: f64,
+        rpm_measured: bool,
         std_rpm: Option<f64>,
         is_rpm_saturated: bool,
     ) {
@@ -412,6 +463,9 @@ impl Responsiveness {
             .long_units(false)
             .decimal_places(2);
 
+        // Logs the value the algorithm actually used, including the substituted
+        // 0.0, so the log matches the arithmetic. The substitution itself is
+        // surfaced separately below rather than being silent.
         info!(
             interval,
             loads = self.load_generator.count_loads(),
@@ -421,6 +475,14 @@ impl Responsiveness {
             rpm_saturated = is_rpm_saturated,
             "interval finished"
         );
+
+        if !rpm_measured {
+            warn!(
+                interval,
+                "no probe measurements in this interval's window; recorded 0 RPM, \
+                 which inflates the stability std for the next MAD intervals"
+            );
+        }
 
         info!(
             interval,
@@ -736,6 +798,24 @@ impl SelfProbeResults {
 ///   Responsiveness         = (Foreign_Responsiveness + Loaded_Responsiveness) / 2
 ///
 /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.3.1.1
+/// Pick the RPM to report for a leg that has finished.
+///
+/// `saturated` holds a value only once responsiveness saturation has been
+/// declared, which draft-ietf-ippm-responsiveness-09 §5.4 wants reported as the
+/// final result. Otherwise the test hit its time limit, and the draft directs us
+/// to report the current result instead -- the most recent interval that
+/// produced a measurement.
+///
+/// `None` from both means no interval ever measured anything, which is missing
+/// data and must not be flattened into a number by callers.
+///
+/// Deliberately takes no clock and no time window; see the call site in
+/// [`Responsiveness::run_test`] for the wall-clock window this replaced and why
+/// it could report zero.
+fn select_reported_rpm(saturated: Option<f64>, last_interval: Option<f64>) -> Option<f64> {
+    saturated.or(last_interval)
+}
+
 fn compute_responsiveness(
     foreign_results: &ForeignProbeResults,
     self_results: &SelfProbeResults,
@@ -839,7 +919,13 @@ struct Env {
 pub struct ResponsivenessResult {
     pub duration: Duration,
     pub capacity: f64,
-    pub rpm: f64,
+    /// Round-trips per minute under working conditions.
+    ///
+    /// `None` means the test produced no responsiveness measurement at all --
+    /// not that responsiveness was zero. Consumers must surface that as missing
+    /// data rather than substituting a placeholder, because a plausible-looking
+    /// number is indistinguishable from a real one once it leaves this crate.
+    pub rpm: Option<f64>,
     pub foreign_loaded_latencies: TimeSeries,
     pub self_probe_latencies: TimeSeries,
     pub loaded_connections: Vec<LoadedConnection>,
@@ -870,7 +956,10 @@ impl Display for ResponsivenessResult {
             "capacity",
             format_size(self.capacity as usize, custom_options)
         )?;
-        write!(f, "{:>8}: {}", "rpm", self.rpm.round() as usize)
+        match self.rpm {
+            Some(rpm) => write!(f, "{:>8}: {}", "rpm", rpm.round() as usize),
+            None => write!(f, "{:>8}: unavailable", "rpm"),
+        }
     }
 }
 
@@ -1026,5 +1115,69 @@ mod tests {
         assert!(new_sum < old_sum, "new {new_sum} should be < old {old_sum}");
         assert!((new_sum - 90.0).abs() < 1e-6);
         assert!((old_sum - 182.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reports_the_saturated_value_when_responsiveness_converged() {
+        // A declared saturation value wins over the last interval's sample.
+        assert_eq!(select_reported_rpm(Some(340.0), Some(999.0)), Some(340.0));
+    }
+
+    #[test]
+    fn reports_the_last_interval_when_the_time_limit_is_reached() {
+        // The unconverged case, which is the norm for the upload leg: report the
+        // most recent measurement rather than nothing.
+        assert_eq!(select_reported_rpm(None, Some(347.9)), Some(347.9));
+    }
+
+    #[test]
+    fn reports_nothing_when_no_interval_ever_measured() {
+        // Must stay absent rather than becoming 0.0: a zero is indistinguishable
+        // from a real measurement once it leaves this crate.
+        assert_eq!(select_reported_rpm(None, None), None);
+    }
+
+    /// Pins the failure mode that made this fix necessary, so that nobody
+    /// reintroduces a wall-clock window to read the final RPM.
+    ///
+    /// RPM samples are stamped with the *computed* interval boundary
+    /// `start + interval_duration * interval`, but `on_interval(i)` runs roughly
+    /// one interval after the instant it stamps. The old code read the result
+    /// back with `interval_average(now - 2s, now)` against the wall clock, so the
+    /// newest sample sat almost exactly on the window's lower edge and whether it
+    /// was included depended purely on how promptly the run loop exited.
+    #[test]
+    fn a_wall_clock_window_can_miss_every_sample() {
+        let start = Timestamp::now();
+        let interval_duration = Duration::from_secs(1);
+
+        // Eleven intervals of samples, stamped the way `on_interval` stamps them.
+        let mut rpm_series = TimeSeries::new();
+        for i in 0..11u32 {
+            rpm_series.add(start + interval_duration * i, 300.0 + f64::from(i));
+        }
+        let newest = start + interval_duration * 10;
+
+        // Prompt exit: the newest sample lands exactly on the lower edge and is
+        // included, which is why this usually appeared to work.
+        let now = newest + Duration::from_secs(2);
+        assert_eq!(
+            rpm_series.interval_average(now - Duration::from_secs(2), now),
+            Some(310.0),
+            "sample exactly on the window edge should be included"
+        );
+
+        // Exit delayed by a single millisecond past that edge: the window now
+        // matches nothing at all, and the old `.unwrap_or(0.0)` turned this into
+        // a reported 0 RPM for a run whose final interval measured 310.
+        let now = newest + Duration::from_secs(2) + Duration::from_millis(1);
+        assert_eq!(
+            rpm_series.interval_average(now - Duration::from_secs(2), now),
+            None,
+            "a 1ms later exit must empty the window -- this is the bug"
+        );
+
+        // The replacement does not consult a clock, so the delay is irrelevant.
+        assert_eq!(select_reported_rpm(None, Some(310.0)), Some(310.0));
     }
 }
