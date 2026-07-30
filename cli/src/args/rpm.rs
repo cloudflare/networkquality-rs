@@ -4,7 +4,34 @@
 //! Arguments for running responsiveness tests.
 
 use clap::{Args, ValueEnum};
-use nq_rpm::ConnectionErrorPolicy;
+use nq_rpm::{ConnectionErrorPolicy, DEFAULT_UPLOAD_BYTES_PER_REQUEST};
+
+/// Smallest accepted `--upload-max-request-bytes`.
+///
+/// Below roughly this size a request completes almost immediately, so the load
+/// generator spends its time opening streams instead of moving bytes. That
+/// generates very little actual load while hammering the server with requests,
+/// which is both a useless measurement and unfriendly to the endpoint.
+pub const MIN_UPLOAD_BYTES_PER_REQUEST: usize = 1024 * 1024;
+
+/// Below this, warn that request overhead is becoming significant.
+pub const SMALL_UPLOAD_BYTES_PER_REQUEST: usize = 16 * 1024 * 1024;
+
+fn parse_upload_bytes_per_request(raw: &str) -> Result<usize, String> {
+    let bytes: usize = raw
+        .parse()
+        .map_err(|_| format!("`{raw}` is not a whole number of bytes"))?;
+
+    if bytes < MIN_UPLOAD_BYTES_PER_REQUEST {
+        return Err(format!(
+            "{bytes} is too small; the minimum is {MIN_UPLOAD_BYTES_PER_REQUEST} (1 MiB). \
+             Requests this small complete instantly, so the load generator would spend the \
+             test opening streams rather than saturating the link"
+        ));
+    }
+
+    Ok(bytes)
+}
 
 /// CLI spelling of [`ConnectionErrorPolicy`].
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -90,6 +117,23 @@ pub struct RpmArgs {
     /// saturate the network.
     #[clap(long = "max-load", default_value = "16")]
     pub max_loaded_connections: usize,
+    /// Maximum bytes sent in any single upload request.
+    ///
+    /// Upload load is generated as a sequence of requests of this size on each
+    /// connection, re-issued as they complete, rather than one enormous request.
+    /// Servers commonly cap how much request body they will buffer and reject
+    /// anything larger: Cloudflare's edge returns HTTP 413 above 500 MB. The cap
+    /// is per-request, so staying under it keeps the link loaded indefinitely.
+    ///
+    /// Lower this if uploads are being rejected; the default leaves 5x margin
+    /// under Cloudflare's limit. It has no effect on links too slow to send this
+    /// much within the test duration.
+    #[clap(
+        long = "upload-max-request-bytes",
+        default_value_t = DEFAULT_UPLOAD_BYTES_PER_REQUEST,
+        value_parser = parse_upload_bytes_per_request,
+    )]
+    pub upload_bytes_per_request: usize,
     /// The duration between interval updates in milliseconds (ms).
     #[clap(long = "interval-duration", default_value = "1000")]
     pub interval_duration_ms: u64,
@@ -117,6 +161,7 @@ impl Default for RpmArgs {
             std_tolerance: 0.05,
             trimmed_mean_percent: 0.95,
             max_loaded_connections: 16,
+            upload_bytes_per_request: DEFAULT_UPLOAD_BYTES_PER_REQUEST,
             interval_duration_ms: 1000, // 1s
             test_duration_ms: 12_000,   // 12s
             disable_aim_scores: false,

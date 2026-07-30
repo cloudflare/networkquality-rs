@@ -14,12 +14,39 @@ use nq_tokio_network::TokioNetwork;
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::aim_report::CloudflareAimResults;
-use crate::args::rpm::RpmArgs;
+use crate::args::rpm::{RpmArgs, SMALL_UPLOAD_BYTES_PER_REQUEST};
 use crate::report::Report;
 use crate::util::pretty_secs_to_ms;
+
+/// Warn loudly when a leg lost load-generating connections.
+///
+/// A failed load-generating connection means the link was not fully loaded for
+/// part of the run, so the RPM score for that leg is measured under weaker
+/// working conditions than intended and reads too high. That is far more
+/// dangerous than an outright error, because the result still looks like a
+/// perfectly ordinary number -- so it needs saying out loud rather than only
+/// appearing as a JSON field.
+fn warn_on_degraded_result(leg: &str, failed_connections: usize, upload_bytes_per_request: usize) {
+    if failed_connections == 0 {
+        return;
+    }
+
+    warn!(
+        "{leg}: {failed_connections} load-generating connection(s) failed, so the link was not \
+         fully loaded for part of the test -- treat this {leg} RPM score as unreliable (it will \
+         read higher than the truth)"
+    );
+
+    if leg == "upload" {
+        warn!(
+            "if these were HTTP 413 rejections, the server caps request bodies below the current \
+             --upload-max-request-bytes ({upload_bytes_per_request}); try a lower value"
+        );
+    }
+}
 
 /// Run a responsiveness test.
 pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
@@ -28,9 +55,12 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     let scoped_headers = crate::access::cf_access_scoped_headers()?;
 
     if cli_config.insecure {
-        error!("TLS certificate verification disabled (--insecure); do not use against production");
+        warn!("TLS certificate verification disabled (--insecure); do not use against production");
         nq_core::set_insecure_tls(true);
     }
+
+    // Copied out before `cli_config` is partially moved building the URL list.
+    let upload_bytes_per_request = cli_config.upload_bytes_per_request;
 
     let rpm_urls = match cli_config.config.clone() {
         Some(endpoint) => {
@@ -87,9 +117,19 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         max_loaded_connections: cli_config.max_loaded_connections,
         conn_type: ConnectionType::H2,
         determine_load_only: false,
+        upload_bytes_per_request: cli_config.upload_bytes_per_request,
         on_connection_error: cli_config.on_connection_error.into(),
         scoped_headers,
     };
+
+    if cli_config.upload_bytes_per_request < SMALL_UPLOAD_BYTES_PER_REQUEST {
+        warn!(
+            "--upload-max-request-bytes is {} ({} MiB); request overhead becomes significant \
+             at this size and the upload leg may under-report capacity",
+            cli_config.upload_bytes_per_request,
+            cli_config.upload_bytes_per_request / (1024 * 1024),
+        );
+    }
 
     info!("running download test");
     let download_result = run_test(&config, true).await?;
@@ -98,6 +138,17 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     info!("running upload test");
     let upload_result = run_test(&config, false).await?;
     debug!("upload result={upload_result:?}");
+
+    warn_on_degraded_result(
+        "download",
+        download_result.failed_connections,
+        upload_bytes_per_request,
+    );
+    warn_on_degraded_result(
+        "upload",
+        upload_result.failed_connections,
+        upload_bytes_per_request,
+    );
 
     let aim_results = CloudflareAimResults::from_rpm_results(
         &rtt_result,
