@@ -1,0 +1,51 @@
+cli/src/args/rpm.rs
+  s_869ef58c1cce93::t_6dc44a8c1df51f 7-34
+  s_869ef58c1cce93::t_8b134f6250c73e 120-136
+  s_869ef58c1cce93::t_75efbb533f041a 164
+cli/src/rpm.rs
+  s_869ef58c1cce93::t_8323955ebc218b 152
+  s_869ef58c1cce93::t_74b116842f92d1 20,24-31,33-45,47-49
+  s_869ef58c1cce93::t_fdb2b9e47a7ea7 46
+  s_869ef58c1cce93::t_21a1c0f9d62c7e 32
+  s_869ef58c1cce93::t_2f1d3e5a6f1cf6 120,125-132
+  s_869ef58c1cce93::t_1a388a27522c2c 62-64
+  s_869ef58c1cce93::t_338e00eaa1b018 142-151
+  s_869ef58c1cce93::t_04799f7fd85b3e 50
+  s_869ef58c1cce93::t_024f77d38bb036 133
+crates/nq-core/src/body/mod.rs
+  s_869ef58c1cce93::t_3acded20f92262 33,35-36,38,40-41,43
+crates/nq-rpm/src/lib.rs
+  s_869ef58c1cce93::t_64349936c54a53 56-68
+  s_869ef58c1cce93::t_964c8806896646 113
+  s_869ef58c1cce93::t_04abcb5525f5c8 144-146
+  s_869ef58c1cce93::t_028ec27ca8cd1c 159-161,165
+  s_869ef58c1cce93::t_fd9bd988b76195 87-93
+  s_869ef58c1cce93::t_49ec684f4772ce 94
+crates/nq-load-generator/src/lib.rs
+  s_869ef58c1cce93::t_fb793579cfa339 404
+  s_869ef58c1cce93::t_f804702c3dcd89 71-75,87-90,95-110,119-131,133-134,138-140
+  s_869ef58c1cce93::t_855dd317819eb0 194-403,405-421
+  s_869ef58c1cce93::t_d6c44289c21341 7,10-11,17
+  s_869ef58c1cce93::t_d85b0f7ebd5baa 540,550-651
+  s_869ef58c1cce93::t_2c716a4ab8ec0a 471-474
+  s_869ef58c1cce93::t_bfc50f5427d49b 141,652
+crates/nq-core/src/lib.rs
+  s_869ef58c1cce93::t_fa765c97dd44b3 22
+  s_869ef58c1cce93::t_f00c63d2fe490d 24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b91d4a877954cbd0d21a71a712f40bdbd87ec0e3",
+  "prompts": {},
+  "sessions": {
+    "s_869ef58c1cce93": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04dbbe2b0ffeN7QehCUKrJTzJO",
+        "model": "claude-opus-5"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
