@@ -1,0 +1,42 @@
+cli/src/report.rs
+  s_869ef58c1cce93::t_b828a8e4529d2d 84-108,113-126
+  s_869ef58c1cce93::t_ac224c21454bb1 109-112
+  s_869ef58c1cce93::t_78ee716d829c2f 74-75
+  s_869ef58c1cce93::t_227d7326dac773 76-79
+cli/src/aim_report.rs
+  s_869ef58c1cce93::t_3d1c65f3308f01 80-86
+crates/nq-rpm/src/lib.rs
+  s_869ef58c1cce93::t_a61d0327314f29 384,408-409
+  s_869ef58c1cce93::t_64f85716aad32e 816
+  s_869ef58c1cce93::t_e014d97114f895 961
+  s_869ef58c1cce93::t_59b43bc90bcac3 1119-1182
+  s_869ef58c1cce93::t_1aa989b7b2e23e 480-481,484-485
+  s_869ef58c1cce93::t_c6f7f9064c6e38 177-178
+  s_869ef58c1cce93::t_bcda39eb429421 291
+  s_869ef58c1cce93::t_5d50198c082662 377,386-407,419-423
+  s_869ef58c1cce93::t_9c1f388abb06fd 456
+  s_869ef58c1cce93::t_02cd5be39c4405 922-928
+  s_869ef58c1cce93::t_f28d37ce7f8843 801-815,817-818
+  s_869ef58c1cce93::t_7fffcb5c30eeec 959-960,962
+  s_869ef58c1cce93::t_564ca25662aefb 466-468,479,482-483
+  s_869ef58c1cce93::t_148f4124ad6491 438-439
+  s_869ef58c1cce93::t_ce8d7a9dd0853b 271-290
+  s_869ef58c1cce93::t_8e7cbff9d8b97a 131-141
+  s_869ef58c1cce93::t_edb58d41e6888b 486
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "53b4f83e5fa940ff4ddc3e74f60b6b38c7093ea0",
+  "prompts": {},
+  "sessions": {
+    "s_869ef58c1cce93": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04dbbe2b0ffeN7QehCUKrJTzJO",
+        "model": "claude-opus-5"
+      },
+      "human_author": "HenriqueSFernandes <henrique@cloudflare.com>"
+    }
+  }
+}
