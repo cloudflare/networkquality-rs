@@ -19,10 +19,10 @@ mod upgraded;
 mod util;
 
 pub use crate::{
-    body::{BodyEvent, CountingBody, NqBody},
+    body::{BodyEvent, CountingBody, InflightBody, NqBody},
     connection::{
-        ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection,
-        insecure_tls, set_insecure_tls,
+        ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection, insecure_tls,
+        set_insecure_tls,
     },
     network::Network,
     scoped_headers::ScopedHeaders,

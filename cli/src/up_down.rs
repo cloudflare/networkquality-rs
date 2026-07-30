@@ -9,7 +9,7 @@ use nq_core::client::{wait_for_finish, ThroughputClient};
 use nq_core::{Network, Time, TokioTime};
 use nq_tokio_network::TokioNetwork;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{info, warn};
 
 use crate::args::up_down::{DownloadArgs, UploadArgs};
 use crate::util::pretty_secs;
@@ -25,7 +25,7 @@ pub async fn download(args: DownloadArgs) -> anyhow::Result<()> {
 
     let conn_type = args.conn_type.into();
     if args.insecure {
-        error!("TLS certificate verification disabled (--insecure); do not use against production");
+        warn!("TLS certificate verification disabled (--insecure); do not use against production");
         nq_core::set_insecure_tls(true);
     }
     info!("downloading: {}", args.url);
@@ -95,7 +95,7 @@ pub async fn upload(args: UploadArgs) -> anyhow::Result<()> {
 
     let conn_type = args.conn_type.into();
     if args.insecure {
-        error!("TLS certificate verification disabled (--insecure); do not use against production");
+        warn!("TLS certificate verification disabled (--insecure); do not use against production");
         nq_core::set_insecure_tls(true);
     }
     let bytes = args.bytes.unwrap_or(10_000_000);

@@ -68,7 +68,6 @@ impl PacketLossConfig {
             scoped_headers: self.scoped_headers.clone(),
             download_url: self.download_url.clone(),
             upload_url: self.upload_url.clone(),
-            upload_size: 4_000_000_000, // 4 GB
         }
     }
 }

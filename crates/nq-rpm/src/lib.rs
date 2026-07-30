@@ -53,6 +53,19 @@ pub struct ResponsivenessConfig {
     pub max_loaded_connections: usize,
     pub conn_type: ConnectionType,
     pub determine_load_only: bool,
+    /// Maximum bytes sent in any single upload load-generating request.
+    ///
+    /// Upload load is generated as a sequence of requests of this size on each
+    /// connection, rather than one enormous request, because servers commonly
+    /// cap how much request body they will buffer and reject anything larger.
+    /// Cloudflare's edge rejects a single request above 500 MB with HTTP 413
+    /// (RADAR-7233); the cap is per-request, so staying under it here keeps the
+    /// link loaded indefinitely without ever tripping it.
+    ///
+    /// Must be below the smallest such cap on the path, with margin. It has no
+    /// effect on connections too slow to send this many bytes within the test
+    /// duration, since their first request never completes either way.
+    pub upload_bytes_per_request: usize,
     /// What to do when a load-generating connection terminates with an error.
     pub on_connection_error: ConnectionErrorPolicy,
     /// Headers attached only to requests whose host matches the scope's
@@ -67,10 +80,17 @@ impl ResponsivenessConfig {
             scoped_headers: self.scoped_headers.clone(),
             download_url: self.large_download_url.clone(),
             upload_url: self.upload_url.clone(),
-            upload_size: 4_000_000_000, // 4 GB
         }
     }
 }
+
+/// Default bytes per upload load-generating request.
+///
+/// 100 MB leaves 5x margin under Cloudflare's 500 MB edge cap, which also covers
+/// the smaller caps other deployments impose. Connections slower than roughly
+/// 160 Mbit/s never complete even one request inside the default test duration,
+/// so for them this is indistinguishable from the previous unbounded behaviour.
+pub const DEFAULT_UPLOAD_BYTES_PER_REQUEST: usize = 100_000_000;
 
 impl Default for ResponsivenessConfig {
     fn default() -> Self {
@@ -90,6 +110,7 @@ impl Default for ResponsivenessConfig {
             max_loaded_connections: 16,
             conn_type: ConnectionType::H2,
             determine_load_only: false,
+            upload_bytes_per_request: DEFAULT_UPLOAD_BYTES_PER_REQUEST,
             on_connection_error: ConnectionErrorPolicy::default(),
             scoped_headers: None,
         }
@@ -120,6 +141,9 @@ impl Responsiveness {
     pub fn new(config: ResponsivenessConfig, download: bool) -> anyhow::Result<Self> {
         let load_generator = LoadGenerator::new(config.load_config())?;
 
+        // Read before `config` is moved into the struct below.
+        let upload_bytes_per_request = config.upload_bytes_per_request;
+
         Ok(Self {
             start: Timestamp::now(),
             config,
@@ -132,10 +156,13 @@ impl Responsiveness {
             starved_intervals: 0,
             goodput_saturated: false,
             rpm_saturated: false,
+            // For uploads this is the size of each individual request, which the
+            // load generator re-issues on the same connection for the duration of
+            // the test -- not a total to be reached.
             direction: if download {
                 Direction::Down
             } else {
-                Direction::Up(std::cmp::min(32u64 * 1024 * 1024 * 1024, usize::MAX as u64) as usize)
+                Direction::Up(upload_bytes_per_request)
             },
             rpm: 0.0,
             capacity: 0.0,

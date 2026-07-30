@@ -4,16 +4,17 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
-use http::{HeaderMap, HeaderName, HeaderValue};
+use http::{HeaderMap, HeaderName, HeaderValue, Uri};
 use nq_core::client::{Direction, ThroughputClient};
 use nq_core::{
-    BodyEvent, ConnectionType, EstablishedConnection, Network, OneshotResult, ScopedHeaders, Time,
-    Timestamp, oneshot_result,
+    BodyEvent, ConnectionType, EstablishedConnection, InflightBody, Network, OneshotResult,
+    ScopedHeaders, Time, Timestamp, oneshot_result,
 };
 use nq_stats::CounterSeries;
 use rand::seq::SliceRandom;
 use serde::Deserialize;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio_util::sync::CancellationToken;
@@ -28,7 +29,6 @@ pub struct LoadConfig {
     pub scoped_headers: Option<ScopedHeaders>,
     pub download_url: url::Url,
     pub upload_url: url::Url,
-    pub upload_size: usize,
 }
 
 pub struct LoadGenerator {
@@ -68,6 +68,11 @@ impl LoadGenerator {
     ) -> anyhow::Result<OneshotResult<LoadedConnection>> {
         let (tx, rx) = oneshot_result();
 
+        let uri: Uri = match direction {
+            Direction::Up(_) => self.config.upload_url.as_str().parse()?,
+            Direction::Down => self.config.download_url.as_str().parse()?,
+        };
+
         let client = match direction {
             Direction::Down => ThroughputClient::download(),
             Direction::Up(size) => ThroughputClient::upload(size),
@@ -79,16 +84,29 @@ impl LoadGenerator {
             .scoped_headers(self.scoped_headers.clone());
 
         let response_fut = client.send(
-            match direction {
-                Direction::Up(_) => self.config.upload_url.as_str().parse()?,
-                Direction::Down => self.config.download_url.as_str().parse()?,
-            },
-            network,
-            time,
-            shutdown,
+            uri.clone(),
+            Arc::clone(&network),
+            Arc::clone(&time),
+            shutdown.clone(),
         )?;
 
         tracing::debug!("got loaded connection response future");
+
+        // An upload load is an open-ended *sequence* of bounded requests rather
+        // than one request, so its events are produced by a driver task instead
+        // of coming straight off a single body. See [`UploadReissue`].
+        let reissue = match direction {
+            Direction::Up(bound) => Some(UploadReissue {
+                bound,
+                uri,
+                headers: self.headers.clone(),
+                scoped_headers: self.scoped_headers.clone(),
+                network,
+                time,
+                shutdown,
+            }),
+            Direction::Down => None,
+        };
 
         tokio::spawn(
             async move {
@@ -98,11 +116,28 @@ impl LoadGenerator {
 
                 tracing::debug!("sending loaded connection");
 
+                let Some(reissue) = reissue else {
+                    let _ = tx.send(Ok(LoadedConnection {
+                        connection: inflight_body.connection,
+                        events_rx: inflight_body.events,
+                        state: LoadState::default(),
+                    }));
+
+                    return Ok(());
+                };
+
+                let (events_tx, events_rx) = mpsc::unbounded_channel();
+                let connection = Arc::clone(&inflight_body.connection);
+
                 let _ = tx.send(Ok(LoadedConnection {
-                    connection: inflight_body.connection,
-                    events_rx: inflight_body.events,
+                    connection: Arc::clone(&connection),
+                    events_rx,
                     state: LoadState::default(),
                 }));
+
+                reissue
+                    .run(connection, inflight_body.events, events_tx)
+                    .await;
 
                 Ok::<_, anyhow::Error>(())
             }
@@ -156,6 +191,234 @@ impl LoadGenerator {
     }
 }
 
+/// Drives an upload load-generating connection as an open-ended sequence of
+/// bounded POSTs, all sent on the same established connection.
+///
+/// A single unbounded POST cannot be used against a server that caps how much
+/// request body it will buffer. Cloudflare's edge rejects one with HTTP 413 at
+/// 500 MB (RADAR-7233), which kills the load part-way through the test; the RPM
+/// score then reflects a network that is barely loaded, so it comes out
+/// flatteringly high rather than simply failing.
+///
+/// Two measured properties of that cap make this approach work: it applies
+/// per-request rather than per-connection, and a 413 does not close the HTTP/2
+/// connection. So an unbounded number of bounded requests can ride one
+/// connection and keep the link continuously loaded without tripping it.
+struct UploadReissue {
+    /// Maximum bytes sent in any single request.
+    bound: usize,
+    uri: Uri,
+    headers: HeaderMap<HeaderValue>,
+    scoped_headers: Option<ScopedHeaders>,
+    network: Arc<dyn Network>,
+    time: Arc<dyn Time>,
+    shutdown: CancellationToken,
+}
+
+/// Why the request currently being relayed stopped producing events.
+#[derive(Debug, PartialEq, Eq)]
+enum RequestEnd {
+    /// The body sent every byte it was asked for.
+    Finished,
+    /// The channel closed before the body finished, i.e. the transfer died.
+    Died,
+}
+
+impl UploadReissue {
+    /// Relay `first`'s events, then keep issuing further bounded requests on
+    /// `connection` for as long as the consumer keeps listening.
+    async fn run(
+        self,
+        connection: Arc<RwLock<EstablishedConnection>>,
+        first: UnboundedReceiver<BodyEvent>,
+        events_tx: mpsc::UnboundedSender<BodyEvent>,
+    ) {
+        let mut current = first;
+        let mut relay = CumulativeRelay::default();
+        let mut requests = 1usize;
+
+        loop {
+            let ended = loop {
+                let event = tokio::select! {
+                    // Test teardown. Returning silently is correct: the consumer
+                    // tells teardown apart from a failure via
+                    // `LoadedConnection::stop`, which sets `stopping` before it
+                    // observes the channel closing.
+                    _ = self.shutdown.cancelled() => return,
+                    event = current.recv() => event,
+                };
+
+                let Some(event) = event else {
+                    break RequestEnd::Died;
+                };
+
+                match relay.on_event(event) {
+                    RelayAction::Forward(event) => {
+                        // A closed channel means `stop()` was called. Returning
+                        // drops `current`, closing the in-flight body's event
+                        // channel, which is what truncates it -- the same
+                        // mechanism a single-request load uses.
+                        if events_tx.send(event).is_err() {
+                            return;
+                        }
+                    }
+                    RelayAction::RequestFinished => break RequestEnd::Finished,
+                    RelayAction::Fail(event) => {
+                        let _ = events_tx.send(event);
+                        return;
+                    }
+                }
+            };
+
+            if ended == RequestEnd::Died {
+                let _ = events_tx.send(BodyEvent::Failed {
+                    at: self.time.now(),
+                    reason: format!(
+                        "upload terminated early after {} request(s), {} bytes",
+                        requests,
+                        relay.total()
+                    ),
+                });
+                return;
+            }
+
+            if events_tx.is_closed() {
+                return;
+            }
+
+            // Start the replacement before dealing with the finished request, so
+            // the connection is refilled as early as possible. `Finished` fires
+            // when the body hands its last frame to hyper, which still has that
+            // data buffered -- so the new request's frames queue behind the tail
+            // of the old one and the socket never goes idle.
+            let next = match self.issue(&connection) {
+                Ok(next) => next,
+                Err(error) => {
+                    let _ = events_tx.send(BodyEvent::Failed {
+                        at: self.time.now(),
+                        reason: format!("could not start upload request {requests}: {error:#}"),
+                    });
+                    return;
+                }
+            };
+
+            let next = match next.await {
+                Ok(inflight) => inflight.events,
+                Err(error) => {
+                    let _ = events_tx.send(BodyEvent::Failed {
+                        at: self.time.now(),
+                        reason: format!("upload request {requests} failed to start: {error:#}"),
+                    });
+                    return;
+                }
+            };
+
+            requests += 1;
+            tracing::debug!(
+                requests,
+                total_bytes = relay.total(),
+                "re-issued bounded upload request"
+            );
+
+            // Because `Finished` precedes the response, the status of the
+            // request just completed is still unknown. Keep draining its channel
+            // in the background so a late rejection still retires this load.
+            let finished = std::mem::replace(&mut current, next);
+            tokio::spawn(watch_tail(finished, events_tx.clone()).in_current_span());
+        }
+    }
+
+    fn issue(
+        &self,
+        connection: &Arc<RwLock<EstablishedConnection>>,
+    ) -> anyhow::Result<OneshotResult<InflightBody>> {
+        ThroughputClient::upload(self.bound)
+            .with_connection(Arc::clone(connection))
+            .headers(self.headers.clone())
+            .scoped_headers(self.scoped_headers.clone())
+            .send(
+                self.uri.clone(),
+                Arc::clone(&self.network),
+                Arc::clone(&self.time),
+                self.shutdown.clone(),
+            )
+    }
+}
+
+/// Drain a completed request's event channel, forwarding only a terminal
+/// failure.
+///
+/// [`UploadReissue::run`] moves to the next request as soon as the previous body
+/// is fully handed to hyper, which happens before its response status is known.
+/// A rejection therefore arrives after the driver has stopped reading that
+/// channel; without this it would be dropped, leaving the load looking healthy
+/// while the server refuses every request.
+async fn watch_tail(
+    mut events: UnboundedReceiver<BodyEvent>,
+    events_tx: mpsc::UnboundedSender<BodyEvent>,
+) {
+    while let Some(event) = events.recv().await {
+        if matches!(event, BodyEvent::Failed { .. }) {
+            let _ = events_tx.send(event);
+            return;
+        }
+    }
+}
+
+/// Translates the per-request [`BodyEvent`] streams of a re-issued upload into
+/// one continuous stream for the consumer.
+///
+/// Every request's `CountingBody` counts from zero, but [`CounterSeries`] treats
+/// its samples as a cumulative counter and derives goodput from `end - start`.
+/// Forwarding a per-request total would make that difference *negative* at every
+/// request boundary, silently corrupting goodput and the saturation detection
+/// built on top of it. Totals are therefore rebased onto a running sum here.
+#[derive(Debug, Default)]
+struct CumulativeRelay {
+    /// Bytes accounted for by requests that have already completed.
+    base: usize,
+    /// Most recent total reported by the in-flight request.
+    last: usize,
+}
+
+/// What [`UploadReissue::run`] should do with a translated event.
+#[derive(Debug)]
+enum RelayAction {
+    /// Pass this event on to the consumer.
+    Forward(BodyEvent),
+    /// The current request completed; start another. Deliberately forwards
+    /// nothing: a `Finished` would set `finished_at` and retire a load that is
+    /// in fact still running.
+    RequestFinished,
+    /// Terminal failure. Forward it and stop.
+    Fail(BodyEvent),
+}
+
+impl CumulativeRelay {
+    fn on_event(&mut self, event: BodyEvent) -> RelayAction {
+        match event {
+            BodyEvent::ByteCount { at, total } => {
+                self.last = total;
+                RelayAction::Forward(BodyEvent::ByteCount {
+                    at,
+                    total: self.base + total,
+                })
+            }
+            BodyEvent::Finished { .. } => {
+                self.base += self.last;
+                self.last = 0;
+                RelayAction::RequestFinished
+            }
+            BodyEvent::Failed { at, reason } => RelayAction::Fail(BodyEvent::Failed { at, reason }),
+        }
+    }
+
+    /// Total bytes sent across every request so far.
+    fn total(&self) -> usize {
+        self.base + self.last
+    }
+}
+
 /// The observable state of a load-generating transfer.
 ///
 /// Split out from [`LoadedConnection`] so the termination logic can be tested
@@ -205,9 +468,10 @@ impl LoadState {
 
     /// Whether the transfer is still running (neither completed nor failed).
     ///
-    /// Note an upload load body is 32 GiB and so never completes within a test
-    /// run; `finished_at == None` is therefore the normal healthy state for
-    /// uploads, which is exactly why a failure needs its own signal.
+    /// `finished_at == None` is the normal healthy state for an upload:
+    /// [`UploadReissue`] replaces each bounded request as it completes and
+    /// swallows the per-request `Finished`, so an upload load never reports
+    /// completion. That is exactly why a failure needs its own signal.
     fn is_ongoing(&self) -> bool {
         self.finished_at.is_none() && !self.failed
     }
@@ -273,6 +537,7 @@ impl LoadedConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tokio::sync::mpsc;
 
     fn channel() -> (
@@ -280,6 +545,109 @@ mod tests {
         mpsc::UnboundedReceiver<BodyEvent>,
     ) {
         mpsc::unbounded_channel()
+    }
+
+    /// Feed a `ByteCount` through the relay and return the total it forwarded.
+    fn forward_bytes(relay: &mut CumulativeRelay, at: Timestamp, total: usize) -> usize {
+        match relay.on_event(BodyEvent::ByteCount { at, total }) {
+            RelayAction::Forward(BodyEvent::ByteCount { total, .. }) => total,
+            other => panic!("a ByteCount must be forwarded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn totals_accumulate_across_request_boundaries() {
+        let at = Timestamp::now();
+        let mut relay = CumulativeRelay::default();
+
+        assert_eq!(forward_bytes(&mut relay, at, 40), 40);
+        assert_eq!(forward_bytes(&mut relay, at, 100), 100);
+        relay.on_event(BodyEvent::Finished { at });
+
+        // The next request counts from zero again; the consumer must not see
+        // that reset.
+        assert_eq!(forward_bytes(&mut relay, at, 0), 100);
+        assert_eq!(forward_bytes(&mut relay, at, 30), 130);
+        relay.on_event(BodyEvent::Finished { at });
+
+        assert_eq!(forward_bytes(&mut relay, at, 5), 135);
+        assert_eq!(relay.total(), 135);
+    }
+
+    #[test]
+    fn request_finished_is_never_forwarded() {
+        // A forwarded `Finished` would set `finished_at`, so `is_ongoing()` would
+        // go false and the ramp would retire a connection that is still running.
+        let at = Timestamp::now();
+        let mut relay = CumulativeRelay::default();
+
+        assert!(matches!(
+            relay.on_event(BodyEvent::Finished { at }),
+            RelayAction::RequestFinished
+        ));
+    }
+
+    #[test]
+    fn failure_is_terminal_and_forwarded() {
+        let at = Timestamp::now();
+        let mut relay = CumulativeRelay::default();
+
+        let action = relay.on_event(BodyEvent::Failed {
+            at,
+            reason: "upload rejected with status 413 Payload Too Large".to_owned(),
+        });
+
+        match action {
+            RelayAction::Fail(BodyEvent::Failed { reason, .. }) => {
+                assert!(reason.contains("413"));
+            }
+            other => panic!("a Failed must be forwarded as terminal, got {other:?}"),
+        }
+    }
+
+    // The regression that matters most. `CounterSeries::interval_sum` is
+    // `end - start`, so if a request boundary ever let a total reset to zero
+    // reach the series, goodput for that window would go *negative* -- which
+    // would silently corrupt the saturation detection that decides when the
+    // test has reached working conditions.
+    #[test]
+    fn relayed_totals_never_produce_negative_goodput() {
+        let start = Timestamp::now();
+        let step = Duration::from_millis(50);
+
+        let mut relay = CumulativeRelay::default();
+        let mut series = CounterSeries::new();
+        let mut at = start;
+
+        // Three consecutive 100-byte requests, each reporting in 25-byte steps.
+        for _ in 0..3 {
+            for total in [0usize, 25, 50, 75, 100] {
+                at = at + step;
+                let forwarded = forward_bytes(&mut relay, at, total);
+                series.add(at, forwarded as f64);
+            }
+            at = at + step;
+            relay.on_event(BodyEvent::Finished { at });
+        }
+
+        assert_eq!(relay.total(), 300, "three 100-byte requests");
+
+        let mut window = start;
+        while window < at {
+            let next = window + step;
+            let bytes = series.interval_sum(window, next);
+            assert!(
+                bytes >= 0.0,
+                "negative goodput ({bytes}) in one window -- a request boundary leaked a reset"
+            );
+            window = next;
+        }
+
+        assert_eq!(
+            series.interval_sum(start, at),
+            300.0,
+            "the whole run must account for every byte exactly once"
+        );
     }
 
     #[test]

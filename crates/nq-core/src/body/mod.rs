@@ -30,9 +30,16 @@ pub use self::{
 
 /// A body that is currently being sent or received.
 pub struct InflightBody {
+    /// When the request that produced this body was started.
     pub start: Timestamp,
+    /// The connection the body is being transferred on. Shared so further
+    /// requests can be sent on the same connection.
     pub connection: Arc<RwLock<EstablishedConnection>>,
+    /// Connection setup timing, when this body created the connection.
     pub timing: Option<ConnectionTiming>,
+    /// Byte-count and termination events for this body. The channel closing is
+    /// itself meaningful: it signals the body was dropped.
     pub events: mpsc::UnboundedReceiver<BodyEvent>,
+    /// Headers associated with the transfer.
     pub headers: HeaderMap<HeaderValue>,
 }
