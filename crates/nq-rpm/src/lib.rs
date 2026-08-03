@@ -56,11 +56,10 @@ pub struct ResponsivenessConfig {
     /// Maximum bytes sent in any single upload load-generating request.
     ///
     /// Upload load is generated as a sequence of requests of this size on each
-    /// connection, rather than one enormous request, because servers commonly
-    /// cap how much request body they will buffer and reject anything larger.
-    /// Cloudflare's edge rejects a single request above 500 MB with HTTP 413
-    /// (RADAR-7233); the cap is per-request, so staying under it here keeps the
-    /// link loaded indefinitely without ever tripping it.
+    /// connection, rather than one enormous request, because servers may cap
+    /// request body size and reject anything larger with HTTP 413. Such caps
+    /// apply per-request, so staying under one here keeps the link loaded
+    /// indefinitely without ever tripping it.
     ///
     /// Must be below the smallest such cap on the path, with margin. It has no
     /// effect on connections too slow to send this many bytes within the test
@@ -86,10 +85,10 @@ impl ResponsivenessConfig {
 
 /// Default bytes per upload load-generating request.
 ///
-/// 100 MB leaves 5x margin under Cloudflare's 500 MB edge cap, which also covers
-/// the smaller caps other deployments impose. Connections slower than roughly
-/// 160 Mbit/s never complete even one request inside the default test duration,
-/// so for them this is indistinguishable from the previous unbounded behaviour.
+/// 100 MB sits well under the request body caps servers commonly impose, with
+/// margin for the stricter ones. On links too slow to send that much within the
+/// test duration the first request never completes anyway, so for them this is
+/// indistinguishable from an unbounded request.
 pub const DEFAULT_UPLOAD_BYTES_PER_REQUEST: usize = 100_000_000;
 
 impl Default for ResponsivenessConfig {
@@ -285,9 +284,9 @@ impl Responsiveness {
         // behind `now`, so whether it fell inside the window came down to how
         // promptly the loop happened to exit. When the exit was ~1s late the
         // window matched nothing and `unwrap_or(0.0)` reported 0 RPM for an
-        // otherwise healthy run (RADAR-7233 follow-up). Measured on this
-        // harness: 13 of 14 runs exited within a millisecond and squeaked in,
-        // one exited 0.999s later and reported zero.
+        // otherwise healthy run. Measured over 14 local runs: 13 exited within
+        // a millisecond and squeaked in, one exited 0.999s later and reported
+        // zero.
         self.rpm = select_reported_rpm(self.rpm, self.last_rpm);
 
         // stop all on-going loads.
