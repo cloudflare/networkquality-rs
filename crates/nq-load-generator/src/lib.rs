@@ -195,15 +195,15 @@ impl LoadGenerator {
 /// bounded POSTs, all sent on the same established connection.
 ///
 /// A single unbounded POST cannot be used against a server that caps how much
-/// request body it will buffer. Cloudflare's edge rejects one with HTTP 413 at
-/// 500 MB (RADAR-7233), which kills the load part-way through the test; the RPM
-/// score then reflects a network that is barely loaded, so it comes out
-/// flatteringly high rather than simply failing.
+/// request body it will buffer: it is rejected with HTTP 413 once it exceeds
+/// the cap, which kills the load part-way through the test. The RPM score then
+/// reflects a network that is barely loaded, so it comes out flatteringly high
+/// rather than simply failing.
 ///
-/// Two measured properties of that cap make this approach work: it applies
-/// per-request rather than per-connection, and a 413 does not close the HTTP/2
-/// connection. So an unbounded number of bounded requests can ride one
-/// connection and keep the link continuously loaded without tripping it.
+/// Two properties of such caps make this approach work: they apply per-request
+/// rather than per-connection, and a 413 does not close the HTTP/2 connection.
+/// So an unbounded number of bounded requests can ride one connection and keep
+/// the link continuously loaded without tripping the cap.
 struct UploadReissue {
     /// Maximum bytes sent in any single request.
     bound: usize,

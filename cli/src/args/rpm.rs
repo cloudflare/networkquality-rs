@@ -121,13 +121,12 @@ pub struct RpmArgs {
     ///
     /// Upload load is generated as a sequence of requests of this size on each
     /// connection, re-issued as they complete, rather than one enormous request.
-    /// Servers commonly cap how much request body they will buffer and reject
-    /// anything larger: Cloudflare's edge returns HTTP 413 above 500 MB. The cap
-    /// is per-request, so staying under it keeps the link loaded indefinitely.
+    /// Servers may cap request body size and reject anything larger with HTTP
+    /// 413. Such caps are per-request, so staying under one keeps the link
+    /// loaded indefinitely.
     ///
-    /// Lower this if uploads are being rejected; the default leaves 5x margin
-    /// under Cloudflare's limit. It has no effect on links too slow to send this
-    /// much within the test duration.
+    /// Lower this if uploads are being rejected. It has no effect on links too
+    /// slow to send this much within the test duration.
     #[clap(
         long = "upload-max-request-bytes",
         default_value_t = DEFAULT_UPLOAD_BYTES_PER_REQUEST,

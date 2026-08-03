@@ -18,7 +18,7 @@ use hyper::client::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, error, info};
+use tracing::{Instrument, debug, error, info, warn};
 
 use crate::body::NqBody;
 use crate::util::ByteStream;
@@ -253,6 +253,17 @@ impl SendRequest {
             if let Some(authority) = req.uri().authority().cloned() {
                 if let Ok(host) = HeaderValue::from_str(authority.as_str()) {
                     req.headers_mut().insert(HOST, host);
+                } else {
+                    // HTTP/1.1 requires a Host header; without one the origin
+                    // answers 400. An authority is already restricted to
+                    // characters a header value accepts, so this is not
+                    // expected to be reachable -- but a silent drop is
+                    // near-impossible to diagnose from the far end.
+                    warn!(
+                        %authority,
+                        "could not build a Host header from the URI authority; \
+                         sending the request without one"
+                    );
                 }
             }
         }
@@ -264,8 +275,17 @@ impl SendRequest {
             .map(|pq| pq.as_str().to_owned())
             .unwrap_or_else(|| "/".to_owned());
 
-        if let Ok(uri) = path_and_query.parse::<http::Uri>() {
-            *req.uri_mut() = uri;
+        match path_and_query.parse::<http::Uri>() {
+            Ok(uri) => *req.uri_mut() = uri,
+            // Leaves the request in absolute-form, which origin servers
+            // reject. The string comes from an already-validated
+            // PathAndQuery so this is not expected to be reachable, but the
+            // failure would otherwise be invisible.
+            Err(error) => warn!(
+                path_and_query,
+                %error,
+                "failed to parse origin-form URI; sending absolute-form"
+            ),
         }
     }
 }
