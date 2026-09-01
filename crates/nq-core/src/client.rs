@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// The default user agent for networkquality requests
-pub const MACH_USER_AGENT: &str = "mach/0.1.0";
+pub const MACH_USER_AGENT: &str = "mach/0.1.1";
 
 /// Describes the direction of the client. This determines if the client times
 /// the upload or download of a body.
@@ -114,7 +114,7 @@ impl ThroughputClient {
         let mut headers = self.headers.take().unwrap_or_default();
 
         if !headers.contains_key("User-Agent") {
-            headers.insert("User-Agent", HeaderValue::from_static("mach/0.1.0"));
+            headers.insert("User-Agent", HeaderValue::from_static(MACH_USER_AGENT));
         }
 
         let host = uri.host().context("uri is missing a host")?.to_string();
