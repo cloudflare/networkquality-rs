@@ -107,6 +107,40 @@ information on what's happening internally, run mach with `RUST_LOG=info` set.
 RUST_LOG=info mach
 ```
 
+# Releasing `mach`
+
+GitHub releases are built by cargo-dist when a version tag is pushed. Publishing
+the package to crates.io remains an explicit `cargo publish` step. Both releases
+must use the `cf-mach` version in `Cargo.toml`.
+
+1. Bump `version` in `Cargo.toml`, run `cargo check` to update `Cargo.lock`, and
+   merge both files to `main` through a pull request.
+2. Update your local `main` branch, verify the crates.io package and cargo-dist
+   release plan, replacing `X.Y.Z` with the version from `Cargo.toml`:
+
+   ```shell
+   git checkout main
+   git pull --ff-only
+   dist plan --tag vX.Y.Z
+   cargo publish --dry-run --locked
+   ```
+
+3. Publish `cf-mach` to crates.io:
+
+   ```shell
+   cargo publish --locked
+   ```
+
+4. Create an annotated tag on the same commit and push it:
+
+   ```shell
+   git tag -a vX.Y.Z -m "cf-mach X.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+The pushed tag triggers `.github/workflows/release.yml`, which builds the
+release artifacts and creates the GitHub release.
+
 # Architecture
 
 `mach` is distributed as the single, binary-only Cargo package `cf-mach`. Its

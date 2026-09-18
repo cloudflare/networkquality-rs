@@ -49,3 +49,7 @@ webrtc = "0.12.0"
 [profile.release]
 debug = 1
 
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
