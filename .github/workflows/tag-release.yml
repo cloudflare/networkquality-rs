@@ -53,3 +53,4 @@ jobs:
       tag: v${{ needs.tag.outputs.version }}
     permissions:
       contents: write
+      id-token: write

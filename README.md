@@ -12,14 +12,46 @@ responsiveness servers.
 
 # Installing
 
-First, [install rust](https://www.rust-lang.org/tools/install).
+## Prebuilt binaries
 
-Then build and run the binary at `./target/release/mach`:
+Download the archive for your platform from the
+[latest release](https://github.com/cloudflare/networkquality-rs/releases/latest),
+extract it, and put `mach` on your `PATH`. Binaries are published for:
+
+- Linux x86_64
+- macOS Apple Silicon
+- Windows x86_64
+
+Each release includes a `SHA256SUMS` file for verifying downloads.
+
+> On macOS, binaries downloaded with a browser are blocked by Gatekeeper because
+> they are not notarized. Remove the quarantine flag before running:
+>
+> ```shell
+> xattr -d com.apple.quarantine ./mach
+> ```
+
+## From crates.io
+
+`mach` is published as the [`cf-mach`](https://crates.io/crates/cf-mach) crate.
+With [Rust installed](https://www.rust-lang.org/tools/install):
 
 ```shell
-cargo build --release
+cargo install cf-mach --locked
+```
 
-# run an rpm test
+`mach` uses [BoringSSL](https://github.com/cloudflare/boring), which is compiled
+from source during the build. This requires CMake and Clang, and on Windows also
+NASM.
+
+## From source
+
+```shell
+git clone https://github.com/cloudflare/networkquality-rs
+cd networkquality-rs
+cargo build --release --locked
+
+# run an RPM test
 ./target/release/mach
 ```
 
