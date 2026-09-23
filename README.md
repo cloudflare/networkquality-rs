@@ -23,14 +23,6 @@ cargo build --release
 ./target/release/mach
 ```
 
-Or install the `cf-mach` package from crates.io. It provides the `mach` binary:
-
-```shell
-cargo install cf-mach
-# run an RPM test
-mach
-```
-
 # Running `mach`
 
 `mach` defaults to running a responsiveness test when given no arguments, the
@@ -131,6 +123,16 @@ The main modules are:
 - `nq_packetloss`: WebRTC/TURN packet-loss measurement.
 - The remaining modules implement CLI arguments, commands, reporting, and AIM score
   submission.
+
+# Releasing
+
+Releases are cut from `main` by GitHub Actions. The version in `Cargo.toml` is
+the source of truth, and every release publishes prebuilt `mach` binaries to
+[GitHub Releases](https://github.com/cloudflare/networkquality-rs/releases).
+
+1. In the Actions tab, run the **cut release** workflow and pick `patch`, `minor`, or `major`. It bumps the version in `Cargo.toml` and `Cargo.lock` on a `release/vX.Y.Z` branch and opens a `release: vX.Y.Z` pull request into `main`.
+2. Review and merge that pull request.
+3. The **tag release** workflow tags the merge commit `vX.Y.Z` and builds `mach` for Linux (x86_64, arm64), macOS (x86_64, arm64), and Windows (x86_64).
 
 # TODOs
 
