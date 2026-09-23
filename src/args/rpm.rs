@@ -60,11 +60,14 @@ pub struct RpmArgs {
     ///     "version": number,
     ///     "test_endpoint": string?,
     ///     "urls": {
-    ///         "small_https_download_url": string,
-    ///         "large_https_download_url": string,
-    ///         "https_upload_url": string
+    ///         "small_download_url": string,
+    ///         "large_download_url": string,
+    ///         "upload_url": string
     ///     }
     /// }
+    ///
+    /// The legacy keys `small_https_download_url`, `large_https_download_url`
+    /// and `https_upload_url` are also accepted and take precedence when present.
     #[clap(short = 'c', long = "config")]
     pub config: Option<String>,
     /// The large file endpoint which should be multiple GBs.
