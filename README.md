@@ -126,13 +126,11 @@ The main modules are:
 
 # Releasing
 
-Releases are cut from `main` by GitHub Actions. The version in `Cargo.toml` is
-the source of truth, and every release publishes prebuilt `mach` binaries to
-[GitHub Releases](https://github.com/cloudflare/networkquality-rs/releases).
+Releases are cut from `main` by GitHub Actions. The version in `Cargo.toml` is the source of truth, and every release publishes prebuilt `mach` binaries to [GitHub Releases](https://github.com/cloudflare/networkquality-rs/releases).
 
 1. In the Actions tab, run the **cut release** workflow and pick `patch`, `minor`, or `major`. It bumps the version in `Cargo.toml` and `Cargo.lock` on a `release/vX.Y.Z` branch and opens a `release: vX.Y.Z` pull request into `main`.
 2. Review and merge that pull request.
-3. The **tag release** workflow tags the merge commit `vX.Y.Z` and builds `mach` for Linux (x86_64, arm64), macOS (x86_64, arm64), and Windows (x86_64).
+3. The **tag release** workflow tags the merge commit `vX.Y.Z` and builds `mach` for Linux (x86_64), macOS (arm64), and Windows (x86_64).
 
 # TODOs
 
