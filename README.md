@@ -23,11 +23,10 @@ cargo build --release
 ./target/release/mach
 ```
 
-Or install it with cargo:
+Or install the `cf-mach` package from crates.io. It provides the `mach` binary:
 
 ```shell
-cargo install --path ./cli
-
+cargo install cf-mach
 # run an RPM test
 mach
 ```
@@ -110,46 +109,28 @@ RUST_LOG=info mach
 
 # Architecture
 
-The main complexity in the repo is due to the `Network` and `Time` trait
-abstractions. We need those abstractions for two reasons. First, it allows us to
-abstract over the underlying request/response implementation which will help
-with WASM/browser support in the future. Second, we use the network abstraction
-to define a Proxy network. This allows us to not only directly test H1, H2, or
-H3 connections, but also to test the impact of a multi-hop proxy network. The
-network trait is built in composable manner; multiple proxy networks can be
-layered on each other to build any proxy configuration.
+`mach` is distributed as the single, binary-only Cargo package `cf-mach`. Its
+implementation is split into private modules under `./src`; they are not separate
+packages or public Rust APIs.
 
-## Crates
+The main complexity comes from the `Network` and `Time` trait abstractions. They
+decouple measurements from the request/response and clock implementations, support
+deterministic tests, and leave room for future WASM/browser transports. The network
+abstraction is composable so alternative transports can be added without changing
+the measurement algorithms.
 
-networkquality-rs is split into multiple crates are under the `./crates`
-directory. They are combined together to form the `mach` cli under `./cli`.
+The main modules are:
 
-- `nq-core`: the core crate which defines the `Time` and `Network` abstractions.
-  It also provides functionality for creating and driving H1 and H2 connections
-  over an abstracted IO transport: `ByteStream`. Finally, it provides a
-  low-level HTTP `Client` used to send arbitrary HTTP requests as well as a
-  `ThroughputClient` which uses a special `CountingBody` to measure the
-  throughput of an HTTP connection.
-
-- `nq-tokio-network`: a `Network` implementation based on tokio (and indirectly
-  on hyper).
-
-- `nq-proxy-network`: a `Network` implementation that wraps another network. To
-  create a new connection for users, the `ProxyNetwork` sends `CONNECT` requests
-  over the inner, wrapped `Network` to the configured proxy server. This is
-  currently unused, however will be added in the future.
-
-- `nq-stats`: provides `Timeseries` and `Counter` types for storing measurements
-  and running simple statisitcs on those series.
-
-- `nq-rpm`: a speedtest which implements the
-  ["Responsiveness under Working Conditions"](draft) draft.
-
-- `nq-latency`: a speedtest which measures latency by timing how long it takes
-  to setup multiple TCP connections.
-
-- `nq-load-generator`: provides a `LoadGenerator` implementation used to create
- load saturated network conditions.
+- `nq_core`: time and network abstractions, HTTP/1 and HTTP/2 connections, low-level
+  clients, request bodies, and throughput accounting.
+- `nq_tokio_network`: the Tokio-backed `Network` implementation.
+- `nq_stats`: time-series and counter statistics used by measurements.
+- `nq_latency`: TCP and HTTP latency measurement.
+- `nq_load_generator`: sustained upload and download load generation.
+- `nq_rpm`: responsiveness-under-working-conditions measurement.
+- `nq_packetloss`: WebRTC/TURN packet-loss measurement.
+- The remaining modules implement CLI arguments, commands, reporting, and AIM score
+  submission.
 
 # TODOs
 
