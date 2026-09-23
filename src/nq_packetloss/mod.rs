@@ -2,7 +2,7 @@
 // Licensed under the BSD-3-Clause license found in the LICENSE file or at https://opensource.org/licenses/BSD-3-Clause
 
 //! This crate is a Rust implementation the Packet Loss measurement as performed by the javascript project
-//! at https://github.com/cloudflare/speedtest.
+//! at <https://github.com/cloudflare/speedtest>.
 //!
 //! As stated by that project, Packet loss is measured by submitting a set of UDP packets to a WebRTC TURN server
 //! in a round-trip fashion, and determining how many packets do not arrive.
