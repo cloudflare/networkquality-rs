@@ -12,8 +12,9 @@ on:
         type: string
   workflow_dispatch: {}
 
+# Least privilege by default: only the publish job may write to the repo.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ inputs.tag || github.ref }}
@@ -50,7 +51,7 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
           - target: aarch64-apple-darwin
             runner: macos-14
           - target: x86_64-pc-windows-msvc
@@ -60,6 +61,9 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.tag || github.ref }}
           fetch-depth: 1
+          # These jobs execute third-party build scripts (boring-sys compiles
+          # vendored BoringSSL); keep the token out of .git/config.
+          persist-credentials: false
 
       # BoringSSL assembles its x86_64 code with NASM on MSVC, and bindgen needs
       # libclang from the image's LLVM install.
@@ -116,11 +120,14 @@ jobs:
     needs: [resolve, build]
     if: needs.resolve.outputs.tag != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and upload assets
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve.outputs.tag }}
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:

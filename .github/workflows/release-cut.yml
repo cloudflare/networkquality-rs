@@ -23,14 +23,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: develop
+          ref: main
           fetch-depth: 0
 
       - name: Compute next version
         id: ver
         run: |
           set -euo pipefail
-          current=$(git show origin/main:Cargo.toml | awk -F'"' '/^version = /{print $2; exit}')
+          current=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
           IFS=. read -r major minor patch <<<"$current"
           case "${{ inputs.bump }}" in
             major) major=$((major + 1)); minor=0; patch=0 ;;

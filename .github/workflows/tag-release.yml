@@ -7,11 +7,15 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   tag:
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    # Same-repo release branches only: a fork PR whose branch happens to start
+    # with release/ must never be able to tag and publish.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -41,15 +45,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${tag}" -m "${tag}"
           git push origin "${tag}"
-
-      - name: Sync the bump back to develop
-        continue-on-error: true # no-op when develop already matches
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr create --base develop --head main \
-            --title "chore: sync v${{ steps.ver.outputs.version }} to develop" \
-            --body "Brings the released version bump back into develop."
 
   release:
     needs: tag
