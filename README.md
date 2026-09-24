@@ -63,6 +63,8 @@ equivalent to `mach rpm`.
 Use `mach help` to see a list of subcommands and `mach help <subcommand>` or
 `mach <subcommand> help` to see options for that command.
 
+Use `mach --license` to print the license `mach` is distributed under.
+
 ## Examples
 
 Running a responsiveness test:

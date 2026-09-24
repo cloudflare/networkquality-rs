@@ -23,6 +23,9 @@ use crate::args::up_down::{DownloadArgs, UploadArgs};
 pub struct Cli {
     #[command(flatten)]
     pub verbosity: clap_verbosity_flag::Verbosity,
+    /// Print the license and exit.
+    #[arg(long, exclusive = true)]
+    pub license: bool,
     #[clap(subcommand)]
     pub command: Option<Command>,
     // todo(fisher): figure out proxies
