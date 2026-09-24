@@ -249,22 +249,22 @@ impl SendRequest {
     /// Rewrite an HTTP/1.1 request into origin-form with a proper `Host` header.
     fn normalize_h1_request(req: &mut Request<NqBody>) {
         // Set `Host` from the full authority (host and, if present, port).
-        if !req.headers().contains_key(HOST) {
-            if let Some(authority) = req.uri().authority().cloned() {
-                if let Ok(host) = HeaderValue::from_str(authority.as_str()) {
-                    req.headers_mut().insert(HOST, host);
-                } else {
-                    // HTTP/1.1 requires a Host header; without one the origin
-                    // answers 400. An authority is already restricted to
-                    // characters a header value accepts, so this is not
-                    // expected to be reachable -- but a silent drop is
-                    // near-impossible to diagnose from the far end.
-                    warn!(
-                        %authority,
-                        "could not build a Host header from the URI authority; \
-                         sending the request without one"
-                    );
-                }
+        if !req.headers().contains_key(HOST)
+            && let Some(authority) = req.uri().authority().cloned()
+        {
+            if let Ok(host) = HeaderValue::from_str(authority.as_str()) {
+                req.headers_mut().insert(HOST, host);
+            } else {
+                // HTTP/1.1 requires a Host header; without one the origin
+                // answers 400. An authority is already restricted to
+                // characters a header value accepts, so this is not
+                // expected to be reachable -- but a silent drop is
+                // near-impossible to diagnose from the far end.
+                warn!(
+                    %authority,
+                    "could not build a Host header from the URI authority; \
+                     sending the request without one"
+                );
             }
         }
 
