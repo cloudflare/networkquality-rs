@@ -11,7 +11,7 @@ use crate::nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use crate::nq_tokio_network::TokioNetwork;
 use anyhow::{Context, bail};
 use http_body_util::BodyExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -65,18 +65,15 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     let rpm_urls = match cli_config.config.clone() {
         Some(endpoint) => {
             info!("fetching configuration from {endpoint}");
-            let urls = get_rpm_config(endpoint, scoped_headers.clone()).await?.urls;
+            let urls = get_rpm_config(endpoint, scoped_headers.clone()).await?;
             info!("retrieved configuration urls: {urls:?}");
 
             urls
         }
         None => {
             let urls = RpmUrls {
-                small_download_url: cli_config.small_download_url.clone(),
-                small_https_download_url: cli_config.small_download_url,
-                large_download_url: cli_config.large_download_url.clone(),
-                large_https_download_url: cli_config.large_download_url,
-                https_upload_url: cli_config.upload_url.clone(),
+                small_download_url: cli_config.small_download_url,
+                large_download_url: cli_config.large_download_url,
                 upload_url: cli_config.upload_url,
             };
             info!("using default configuration urls: {urls:?}");
@@ -88,7 +85,7 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     // first get unloaded RTT measurements
     info!("determining unloaded latency");
     let rtt_result = crate::latency::run_test(&LatencyConfig {
-        url: rpm_urls.small_https_download_url.parse()?,
+        url: rpm_urls.small_download_url.parse()?,
         runs: 20,
         scoped_headers: scoped_headers.clone(),
     })
@@ -106,9 +103,9 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     );
 
     let config = ResponsivenessConfig {
-        large_download_url: rpm_urls.large_https_download_url.parse()?,
-        small_download_url: rpm_urls.small_https_download_url.parse()?,
-        upload_url: rpm_urls.https_upload_url.parse()?,
+        large_download_url: rpm_urls.large_download_url.parse()?,
+        small_download_url: rpm_urls.small_download_url.parse()?,
+        upload_url: rpm_urls.upload_url.parse()?,
         moving_average_distance: cli_config.moving_average_distance,
         interval_duration: Duration::from_millis(cli_config.interval_duration_ms),
         test_duration: Duration::from_millis(cli_config.test_duration_ms),
@@ -202,25 +199,77 @@ async fn run_test(
     Ok(result)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RpmServerConfig {
-    urls: RpmUrls,
+/// Server config as published at a responsiveness config endpoint.
+///
+/// Servers name each URL either with the spec key (`small_download_url`) or
+/// the legacy `https` key (`small_https_download_url`); Cloudflare ships both,
+/// Apple only the spec keys. Resolved into [`RpmUrls`] by [`parse_rpm_config`].
+#[derive(Deserialize)]
+struct RpmServerConfig {
+    urls: RpmServerUrls,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Deserialize)]
+struct RpmServerUrls {
+    small_download_url: Option<String>,
+    small_https_download_url: Option<String>,
+    large_download_url: Option<String>,
+    large_https_download_url: Option<String>,
+    upload_url: Option<String>,
+    https_upload_url: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct RpmUrls {
     small_download_url: String,
-    small_https_download_url: String,
     large_download_url: String,
-    large_https_download_url: String,
     upload_url: String,
-    https_upload_url: String,
+}
+
+/// Pick the legacy `https` key when present, else the spec key.
+fn resolve_url(
+    https: Option<String>,
+    plain: Option<String>,
+    https_key: &str,
+    plain_key: &str,
+) -> anyhow::Result<String> {
+    match https.or(plain) {
+        Some(url) => Ok(url),
+        None => bail!("rpm config is missing `{plain_key}` (or `{https_key}`)"),
+    }
+}
+
+fn parse_rpm_config(body: &[u8]) -> anyhow::Result<RpmUrls> {
+    let config: RpmServerConfig =
+        serde_json::from_slice(body).context("parsing json config from rpm url")?;
+    let urls = config.urls;
+
+    Ok(RpmUrls {
+        small_download_url: resolve_url(
+            urls.small_https_download_url,
+            urls.small_download_url,
+            "small_https_download_url",
+            "small_download_url",
+        )?,
+        large_download_url: resolve_url(
+            urls.large_https_download_url,
+            urls.large_download_url,
+            "large_https_download_url",
+            "large_download_url",
+        )?,
+        upload_url: resolve_url(
+            urls.https_upload_url,
+            urls.upload_url,
+            "https_upload_url",
+            "upload_url",
+        )?,
+    })
 }
 
 pub async fn get_rpm_config(
     config_url: String,
     scoped_headers: Option<crate::nq_core::ScopedHeaders>,
-) -> anyhow::Result<RpmServerConfig> {
+) -> anyhow::Result<RpmUrls> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new());
     let network = Arc::new(TokioNetwork::new(
@@ -246,8 +295,64 @@ pub async fn get_rpm_config(
         bail!("could not fetch rpm config from: {config_url}");
     }
 
-    let json = serde_json::from_slice(&response.into_body().collect().await?.to_bytes())
-        .context("parsing json config from rpm url")?;
+    parse_rpm_config(&response.into_body().collect().await?.to_bytes())
+}
 
-    Ok(json)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verbatim body of https://mensura.cdn-apple.com/.well-known/nq (issue #53).
+    const APPLE_CONFIG: &str = r#"{ "version": 1,
+  "test_endpoint": "esmad6-edge-fx-028.aaplimg.com",
+  "urls": {
+      "small_download_url": "https://mensura.cdn-apple.com/api/v1/gm/small",
+      "large_download_url": "https://mensura.cdn-apple.com/api/v1/gm/large",
+      "upload_url": "https://mensura.cdn-apple.com/api/v1/gm/slurp"
+   }
+}"#;
+
+    #[test]
+    fn spec_only_keys_resolve() {
+        let urls = parse_rpm_config(APPLE_CONFIG.as_bytes()).unwrap();
+        assert_eq!(
+            urls.small_download_url,
+            "https://mensura.cdn-apple.com/api/v1/gm/small"
+        );
+        assert_eq!(
+            urls.large_download_url,
+            "https://mensura.cdn-apple.com/api/v1/gm/large"
+        );
+        assert_eq!(
+            urls.upload_url,
+            "https://mensura.cdn-apple.com/api/v1/gm/slurp"
+        );
+    }
+
+    #[test]
+    fn https_keys_take_precedence() {
+        let body = r#"{"urls": {
+            "small_download_url": "http://a/small",
+            "small_https_download_url": "https://a/small",
+            "large_download_url": "http://a/large",
+            "large_https_download_url": "https://a/large",
+            "upload_url": "http://a/up",
+            "https_upload_url": "https://a/up"
+        }}"#;
+        let urls = parse_rpm_config(body.as_bytes()).unwrap();
+        assert_eq!(urls.small_download_url, "https://a/small");
+        assert_eq!(urls.large_download_url, "https://a/large");
+        assert_eq!(urls.upload_url, "https://a/up");
+    }
+
+    #[test]
+    fn missing_url_names_both_keys() {
+        let body = r#"{"urls": {
+            "small_download_url": "https://a/small",
+            "large_https_download_url": "https://a/large"
+        }}"#;
+        let err = parse_rpm_config(body.as_bytes()).unwrap_err().to_string();
+        assert!(err.contains("`upload_url`"), "{err}");
+        assert!(err.contains("`https_upload_url`"), "{err}");
+    }
 }
