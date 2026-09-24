@@ -19,7 +19,8 @@ mod saturate;
 mod up_down;
 mod util;
 
-use clap::Parser;
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser};
 use clap_verbosity_flag::LevelFilter;
 
 use crate::args::Command;
@@ -28,6 +29,20 @@ use crate::args::rpm::RpmArgs;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = args::Cli::parse();
+
+    if args.license {
+        if args.command.is_some() {
+            args::Cli::command()
+                .bin_name("mach")
+                .error(
+                    ErrorKind::ArgumentConflict,
+                    "the argument '--license' cannot be used with a subcommand",
+                )
+                .exit();
+        }
+        print!("{}", include_str!("../LICENSE"));
+        return Ok(());
+    }
 
     setup_logging(args.verbosity)?;
 
