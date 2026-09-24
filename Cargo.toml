@@ -14,7 +14,7 @@ readme = "README.md"
 keywords = ["network-quality", "latency", "speedtest", "responsiveness", "packet-loss"]
 categories = ["command-line-utilities", "network-programming"]
 publish = ["crates-io"]
-include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "CHANGELOG.md", "LICENSE"]
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 default-run = "mach"
 
 [[bin]]
