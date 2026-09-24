@@ -144,7 +144,7 @@ pub struct RpmArgs {
     pub test_duration_ms: u64,
     /// Disable AIM score reporting.
     ///
-    /// https://blog.cloudflare.com/aim-database-for-internet-quality/
+    /// <https://blog.cloudflare.com/aim-database-for-internet-quality/>
     #[clap(long)]
     pub disable_aim_scores: bool,
 }

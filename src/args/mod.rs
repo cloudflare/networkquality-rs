@@ -39,7 +39,7 @@ pub enum Command {
     /// capacity.
     ///
     /// This implements "Responsiveness under Working Conditions" draft:
-    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03
+    /// <https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09>
     Rpm(RpmArgs),
     /// Download data (GET) from an endpoint, reporting latency measurements and total
     /// throughput.
