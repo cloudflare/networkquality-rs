@@ -348,7 +348,7 @@ impl Responsiveness {
         // always start a load generating connection
         // TODO: only if goodput is not saturated?
         if self.load_generator.count_loads() < self.config.max_loaded_connections
-            && interval % 2 == 0
+            && interval.is_multiple_of(2)
         {
             self.new_load_generating_connection(event_tx, env, shutdown)?;
         }

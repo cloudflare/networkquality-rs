@@ -18,12 +18,12 @@ pub struct SampleRange {
 
 impl CounterSeries {
     pub fn add(&mut self, timestamp: Timestamp, sample: f64) {
-        if let Some(&last_timestamp) = self.timestamps.last() {
-            if timestamp > last_timestamp {
-                self.timestamps.push(timestamp);
-                self.samples.push(sample);
-                return;
-            }
+        if let Some(&last_timestamp) = self.timestamps.last()
+            && timestamp > last_timestamp
+        {
+            self.timestamps.push(timestamp);
+            self.samples.push(sample);
+            return;
         }
         let idx = self.timestamps.partition_point(|&p| p < timestamp);
 

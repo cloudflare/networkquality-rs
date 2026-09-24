@@ -234,10 +234,10 @@ fn add_ice_candidate_handler(
         let maybe_first_connection = maybe_first_connection.clone();
 
         Box::pin(async move {
-            if let Some(candidate) = candidate {
-                if let Err(err) = add_ice_candidate(&candidate, &maybe_first_connection).await {
-                    tracing::warn!(?err, "Failed to add sender ICE candidate")
-                }
+            if let Some(candidate) = candidate
+                && let Err(err) = add_ice_candidate(&candidate, &maybe_first_connection).await
+            {
+                tracing::warn!(?err, "Failed to add sender ICE candidate")
             }
         })
     }));
