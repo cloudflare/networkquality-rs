@@ -20,13 +20,18 @@ default-run = "mach"
 [[bin]]
 name = "mach"
 path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:clap-verbosity-flag", "dep:tracing-subscriber"]
 
 [dependencies]
 anyhow = { version = "1.0", features = ["backtrace"] }
 boring = "5.0"
 bytes = "1.6.0"
-clap = { version = "4.3", features = ["derive"] }
-clap-verbosity-flag = "2.1"
+clap = { version = "4.3", optional = true, features = ["derive"] }
+clap-verbosity-flag = { version = "2.1", optional = true }
 http = "1.0"
 http-body-util = "0.1.2"
 humansize = "2.1.3"
@@ -42,7 +47,7 @@ tokio = { version = "1.43", features = ["rt-multi-thread", "time", "net", "test-
 tokio-boring = "5.0"
 tokio-util = "0.7"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "fmt"] }
 url = { version = "2.4", features = ["serde"] }
 webrtc = "0.12.0"
 
