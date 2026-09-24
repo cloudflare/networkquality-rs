@@ -135,9 +135,10 @@ RUST_LOG=info mach
 
 # Architecture
 
-`mach` is distributed as the single, binary-only Cargo package `cf-mach`. Its
-implementation is split into private modules under `./src`; they are not separate
-packages or public Rust APIs.
+`mach` is distributed as the single, bin+lib Cargo package `cf-mach`. Its
+implementation is split into modules, documented below.
+
+🚧 *Note*: While `cf-mach` can be used as a library, the interface is not stable.
 
 The main complexity comes from the `Network` and `Time` trait abstractions. They
 decouple measurements from the request/response and clock implementations, support
