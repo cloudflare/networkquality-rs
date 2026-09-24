@@ -499,7 +499,7 @@ impl Responsiveness {
     /// bytes of data transferred within interval p and the MAD (Moving Average Distance) - 1 immediately
     /// preceding intervals, divided by MAD times ID (Interval Duration).
     ///
-    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.4-5.2.1
+    /// <https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.4-5.2.1>
     fn current_average_throughput(&self, end_data_interval: Timestamp) -> f64 {
         let start_data_interval =
             instant_minus_intervals(end_data_interval, 4, self.config.interval_duration);
@@ -616,7 +616,7 @@ impl Responsiveness {
     /// > first element of a web page (e.g., "index.html"), or the startup time
     /// > for a video streaming client to launch and begin fetching media.
     ///
-    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3-3.1.1
+    /// <https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.3-3.1.1>
     fn send_foreign_probe(
         &mut self,
         event_tx: mpsc::Sender<Event>,
@@ -681,7 +681,7 @@ impl Responsiveness {
     /// > connection should take less time than creating a brand new TLS
     /// > connection from scratch to do the same thing.
     ///
-    /// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03#section-4.3-3.2.1
+    /// <https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.3-3.2.1>
     fn send_self_probe(
         &mut self,
         event_tx: mpsc::Sender<Event>,
@@ -795,7 +795,7 @@ impl SelfProbeResults {
 ///   Loaded_Responsiveness  = 60000 / TM(http_l)
 ///   Responsiveness         = (Foreign_Responsiveness + Loaded_Responsiveness) / 2
 ///
-/// https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.3.1.1
+/// <https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09#section-5.3.1.1>
 /// Pick the RPM to report for a leg that has finished.
 ///
 /// `saturated` holds a value only once responsiveness saturation has been

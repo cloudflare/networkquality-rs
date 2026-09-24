@@ -193,7 +193,7 @@ impl Default for PacketLossMeasurement {
 }
 
 /// Calculated AIM scores:
-/// https://developers.cloudflare.com/speed/aim/
+/// <https://developers.cloudflare.com/speed/aim/>
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs, dead_code)]
