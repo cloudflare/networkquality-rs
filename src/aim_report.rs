@@ -117,16 +117,21 @@ impl CloudflareAimResults {
             )?
             .await?;
 
-        let (status, status_text) = (response.status(), response.status().to_string());
+        let status = response.status();
         let body = response.into_body().collect().await?.to_bytes();
+        let body = String::from_utf8_lossy(&body);
 
-        debug!(
-            "aim upload response: {status} ({status_text}); {}",
-            String::from_utf8_lossy(&body)
-        );
+        debug!("aim upload response: {status}; {body}");
 
-        if status != 200 {
-            anyhow::bail!("error uploading aim results");
+        if !status.is_success() {
+            let excerpt: String = body
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(200)
+                .collect();
+            anyhow::bail!("server responded {status}: {excerpt}");
         }
 
         Ok(())

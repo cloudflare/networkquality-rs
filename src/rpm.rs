@@ -14,7 +14,7 @@ use http_body_util::BodyExt;
 use serde::Deserialize;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::aim_report::CloudflareAimResults;
 use crate::args::rpm::{RpmArgs, SMALL_UPLOAD_BYTES_PER_REQUEST};
@@ -158,7 +158,7 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
         if !cli_config.disable_aim_scores {
             debug!("uploading aim report");
             if let Err(e) = aim_results.upload().await {
-                error!("error uploading aim results: {e}");
+                warn!("error uploading aim results: {e}");
             }
         }
     });
