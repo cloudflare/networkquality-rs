@@ -5,13 +5,6 @@ mod access;
 mod aim_report;
 pub(crate) mod args;
 mod latency;
-mod nq_core;
-mod nq_latency;
-mod nq_load_generator;
-mod nq_packetloss;
-mod nq_rpm;
-mod nq_stats;
-mod nq_tokio_network;
 mod packet_loss;
 mod report;
 mod rpm;
@@ -20,6 +13,8 @@ mod up_down;
 mod util;
 
 use std::io::IsTerminal;
+
+use cf_mach::{nq_core, nq_latency, nq_load_generator, nq_packetloss, nq_rpm, nq_tokio_network};
 
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};

@@ -3,7 +3,7 @@
 networkquality-rs is a collection of tools for measuring the quality of a
 network. This repo provides a CLI tool `mach` which can be used to run multiple
 different tests. The main focus of `mach` and this repo is to implement the IETF
-draft: ["Responsiveness under Working Conditions"](draft).
+draft: ["Responsiveness under Working Conditions"](https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-09).
 
 The draft defines "responsiveness", measured in **R**ound trips **P**er
 **M**inute (RPM), as a useful measurement of network quality. `mach`'s default
@@ -135,9 +135,10 @@ RUST_LOG=info mach
 
 # Architecture
 
-`mach` is distributed as the single, binary-only Cargo package `cf-mach`. Its
-implementation is split into private modules under `./src`; they are not separate
-packages or public Rust APIs.
+`mach` is distributed as the single, bin+lib Cargo package `cf-mach`. Its
+implementation is split into modules, documented below.
+
+🚧 *Note*: While `cf-mach` can be used as a library, the interface is not stable.
 
 The main complexity comes from the `Network` and `Time` trait abstractions. They
 decouple measurements from the request/response and clock implementations, support
@@ -190,4 +191,3 @@ Releases are cut from `main` by GitHub Actions. The version in `Cargo.toml` is t
       calculating a better `CountingBody` update rate.
 - [x] Properly signal the connections on a network to shutdown.
 
-[draft]: https://datatracker.ietf.org/doc/html/draft-ietf-ippm-responsiveness-03

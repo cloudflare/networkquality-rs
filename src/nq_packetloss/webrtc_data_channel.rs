@@ -144,7 +144,7 @@ async fn create_sender_data_connection(
 }
 
 /// The message receiver creates a [`RTCPeerConnection`] and opens the receiving end of the senders [`RTCDataChannel`].
-/// The data channel is used to receive the sent messages and forward the contents via a [`Sender`].
+/// The data channel is used to receive the sent messages and forward the contents via a [`UnboundedSender`].
 async fn create_receiver_connection(
     turn_server_uri: &String,
     creds: &TurnServerCreds,
