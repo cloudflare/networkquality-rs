@@ -12,6 +12,8 @@ mod saturate;
 mod up_down;
 mod util;
 
+use std::io::IsTerminal;
+
 use cf_mach::{nq_core, nq_latency, nq_load_generator, nq_packetloss, nq_rpm, nq_tokio_network};
 
 use clap::error::ErrorKind;
@@ -39,6 +41,10 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let show_progress = std::io::stderr().is_terminal()
+        && std::env::var_os("RUST_LOG").is_none()
+        && args.verbosity.log_level_filter() <= LevelFilter::Error;
+
     setup_logging(args.verbosity)?;
 
     // default to RPM
@@ -47,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| Command::Rpm(RpmArgs::default()));
 
     match command {
-        Command::Rpm(config) => rpm::run(config).await?,
+        Command::Rpm(config) => rpm::run(config, show_progress).await?,
         Command::Download(config) => up_down::download(config).await?,
         Command::Upload(config) => up_down::upload(config).await?,
         Command::Rtt { url, runs } => latency::run(url, runs).await?,

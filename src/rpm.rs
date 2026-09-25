@@ -11,6 +11,7 @@ use crate::nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use crate::nq_tokio_network::TokioNetwork;
 use anyhow::{Context, bail};
 use http_body_util::BodyExt;
+use indicatif::{ProgressBar, ProgressFinish, ProgressStyle};
 use serde::Deserialize;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
@@ -48,8 +49,34 @@ fn warn_on_degraded_result(leg: &str, failed_connections: usize, upload_bytes_pe
     }
 }
 
+fn start_phase(show: bool, msg: &'static str) -> ProgressBar {
+    if !show {
+        return ProgressBar::hidden();
+    }
+
+    let pb = ProgressBar::new_spinner()
+        .with_style(
+            ProgressStyle::with_template("{spinner:.cyan} {msg} {elapsed:.dim}")
+                .expect("valid spinner template"),
+        )
+        .with_message(msg)
+        .with_finish(ProgressFinish::AndClear);
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb
+}
+
+/// Replace a phase's spinner with a permanent `✓` line.
+fn finish_phase(pb: ProgressBar, msg: String) {
+    pb.set_style(
+        ProgressStyle::with_template("{prefix:.green} {msg} {elapsed:.dim}")
+            .expect("valid finished template"),
+    );
+    pb.set_prefix("✓");
+    pb.finish_with_message(msg);
+}
+
 /// Run a responsiveness test.
-pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
+pub async fn run(cli_config: RpmArgs, show_progress: bool) -> anyhow::Result<()> {
     info!("running responsiveness test");
 
     let scoped_headers = crate::access::cf_access_scoped_headers()?;
@@ -65,7 +92,9 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     let rpm_urls = match cli_config.config.clone() {
         Some(endpoint) => {
             info!("fetching configuration from {endpoint}");
+            let pb = start_phase(show_progress, "Fetching configuration");
             let urls = get_rpm_config(endpoint, scoped_headers.clone()).await?;
+            finish_phase(pb, "Fetched configuration".to_string());
             info!("retrieved configuration urls: {urls:?}");
 
             urls
@@ -84,23 +113,23 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
 
     // first get unloaded RTT measurements
     info!("determining unloaded latency");
+    let pb = start_phase(show_progress, "Measuring unloaded latency");
     let rtt_result = crate::latency::run_test(&LatencyConfig {
         url: rpm_urls.small_download_url.parse()?,
         runs: 20,
         scoped_headers: scoped_headers.clone(),
     })
     .await?;
-    info!(
-        "unloaded latency: {} ms. jitter: {} ms",
-        rtt_result
-            .median()
-            .map(pretty_secs_to_ms)
-            .unwrap_or_default(),
-        rtt_result
-            .jitter()
-            .map(pretty_secs_to_ms)
-            .unwrap_or_default(),
-    );
+    let median_ms = rtt_result
+        .median()
+        .map(pretty_secs_to_ms)
+        .unwrap_or_default();
+    let jitter_ms = rtt_result
+        .jitter()
+        .map(pretty_secs_to_ms)
+        .unwrap_or_default();
+    finish_phase(pb, format!("Unloaded latency: {median_ms} ms"));
+    info!("unloaded latency: {median_ms} ms. jitter: {jitter_ms} ms");
 
     let config = ResponsivenessConfig {
         large_download_url: rpm_urls.large_download_url.parse()?,
@@ -129,11 +158,15 @@ pub async fn run(cli_config: RpmArgs) -> anyhow::Result<()> {
     }
 
     info!("running download test");
+    let pb = start_phase(show_progress, "Running download test");
     let download_result = run_test(&config, true).await?;
+    finish_phase(pb, "Download test".to_string());
     debug!("download result={download_result:?}");
 
     info!("running upload test");
+    let pb = start_phase(show_progress, "Running upload test");
     let upload_result = run_test(&config, false).await?;
+    finish_phase(pb, "Upload test".to_string());
     debug!("upload result={upload_result:?}");
 
     warn_on_degraded_result(
