@@ -177,6 +177,7 @@ impl ThroughputClient {
         tracing::debug!("created request: {request:?}");
 
         let failure_time = Arc::clone(&time);
+        let teardown = shutdown.clone();
         tokio::spawn(
             async move {
                 if let Err(error) = self
@@ -193,7 +194,12 @@ impl ThroughputClient {
                     )
                     .await
                 {
-                    error!("error sending ThroughputClient request: {error:#}");
+                    // Test teardown closes every connection while requests may still be in flight
+                    if teardown.is_cancelled() {
+                        debug!("ThroughputClient request cancelled by shutdown: {error:#}");
+                    } else {
+                        error!("error sending ThroughputClient request: {error:#}");
+                    }
 
                     // An upload's failure (rejected status, reset stream, dead
                     // connection) is invisible to its request body, which just
