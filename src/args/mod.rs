@@ -91,7 +91,6 @@ pub enum ConnType {
     H1ClearText,
     H1,
     H2,
-    H3,
 }
 
 impl From<ConnType> for ConnectionType {
@@ -100,7 +99,6 @@ impl From<ConnType> for ConnectionType {
             ConnType::H1ClearText => ConnectionType::H1 { use_tls: false },
             ConnType::H1 => ConnectionType::H1 { use_tls: true },
             ConnType::H2 => ConnectionType::H2,
-            ConnType::H3 => ConnectionType::H3,
         }
     }
 }
