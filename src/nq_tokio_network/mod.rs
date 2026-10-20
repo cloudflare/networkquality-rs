@@ -209,3 +209,37 @@ async fn timed_lookup_host(host: String, time: Arc<dyn Time>) -> anyhow::Result<
 
     Ok(addrs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nq_core::{TokioTime, connect_first_reachable};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn connect_first_reachable_falls_back_to_the_next_address() {
+        let refused = TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let reachable = listener.local_addr().unwrap();
+
+        let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
+        let network = TokioNetwork::new(Arc::clone(&time), CancellationToken::new());
+
+        connect_first_reachable(
+            &network,
+            time.as_ref(),
+            time.now(),
+            &[refused, reachable],
+            "localhost",
+            ConnectionType::H1 { use_tls: false },
+        )
+        .await
+        .unwrap();
+
+        listener.accept().await.unwrap();
+    }
+}
