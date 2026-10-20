@@ -23,7 +23,7 @@ pub use self::{
         ConnectionManager, ConnectionTiming, ConnectionType, EstablishedConnection,
         set_insecure_tls,
     },
-    network::Network,
+    network::{CONNECT_ATTEMPT_TIMEOUT, Network, connect_first_reachable},
     scoped_headers::ScopedHeaders,
     time::{Time, Timestamp, TokioTime},
     util::{OneshotResult, ResponseFuture, oneshot_result},
