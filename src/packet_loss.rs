@@ -26,6 +26,7 @@ pub async fn run(args: PacketLossArgs) -> anyhow::Result<()> {
         response_wait_time: Duration::from_millis(args.response_wait_time_ms),
         download_url: args.download_url.parse()?,
         upload_url: args.upload_url.parse()?,
+        generate_load: !args.no_load,
         scoped_headers: crate::access::cf_access_scoped_headers()?,
     };
 
