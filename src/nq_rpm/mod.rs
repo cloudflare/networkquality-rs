@@ -16,7 +16,10 @@ use crate::nq_core::{
 use crate::nq_load_generator::{LoadConfig, LoadGenerator, LoadedConnection};
 use crate::nq_stats::{TimeSeries, instant_minus_intervals};
 use humansize::{DECIMAL, format_size};
-use tokio::{select, sync::mpsc};
+use tokio::{
+    select,
+    sync::{mpsc, watch},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
 use url::Url;
@@ -144,6 +147,20 @@ pub struct Responsiveness {
     /// Consecutive intervals that ended with no live load-generating
     /// connection while failures were occurring.
     starved_intervals: usize,
+    progress: watch::Sender<ResponsivenessProgress>,
+}
+
+/// A snapshot of a running responsiveness test, published once per interval.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ResponsivenessProgress {
+    /// The interval that produced this snapshot, counting from 0.
+    pub interval: usize,
+    /// Moving average aggregate goodput across the load-generating
+    /// connections, in bits per second.
+    pub goodput: f64,
+    /// Responsiveness measured in this interval's window, or `None` when the
+    /// window held no probe measurements.
+    pub rpm: Option<f64>,
 }
 
 impl Responsiveness {
@@ -176,7 +193,14 @@ impl Responsiveness {
             rpm: None,
             last_rpm: None,
             capacity: 0.0,
+            progress: watch::Sender::default(),
         })
+    }
+
+    /// Returns a receiver that sees a [`ResponsivenessProgress`] at the end of
+    /// each interval of [`Self::run_test`].
+    pub fn subscribe(&self) -> watch::Receiver<ResponsivenessProgress> {
+        self.progress.subscribe()
     }
 }
 
@@ -406,6 +430,12 @@ impl Responsiveness {
         if let Some(current_rpm) = current_rpm {
             self.last_rpm = Some(current_rpm);
         }
+
+        self.progress.send_replace(ResponsivenessProgress {
+            interval,
+            goodput: current_goodput,
+            rpm: current_rpm,
+        });
 
         let std_rpm = self
             .rpm_series
