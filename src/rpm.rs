@@ -11,8 +11,10 @@ use crate::nq_rpm::{Responsiveness, ResponsivenessConfig, ResponsivenessResult};
 use crate::nq_tokio_network::TokioNetwork;
 use anyhow::{Context, bail};
 use http_body_util::BodyExt;
+use humansize::{BaseUnit, DECIMAL, FormatSizeOptions, format_size};
 use indicatif::{ProgressBar, ProgressFinish, ProgressStyle};
 use serde::Deserialize;
+use tokio::select;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -159,13 +161,13 @@ pub async fn run(cli_config: RpmArgs, show_progress: bool) -> anyhow::Result<()>
 
     info!("running download test");
     let pb = start_phase(show_progress, "Running download test");
-    let download_result = run_test(&config, true).await?;
+    let download_result = run_test(&config, true, &pb).await?;
     finish_phase(pb, "Download test".to_string());
     debug!("download result={download_result:?}");
 
     info!("running upload test");
     let pb = start_phase(show_progress, "Running upload test");
-    let upload_result = run_test(&config, false).await?;
+    let upload_result = run_test(&config, false, &pb).await?;
     finish_phase(pb, "Upload test".to_string());
     debug!("upload result={upload_result:?}");
 
@@ -211,9 +213,12 @@ pub async fn run(cli_config: RpmArgs, show_progress: bool) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Runs one leg of the responsiveness test, appending the current goodput to
+/// `pb`'s message after each interval.
 async fn run_test(
     config: &ResponsivenessConfig,
     download: bool,
+    pb: &ProgressBar,
 ) -> anyhow::Result<ResponsivenessResult> {
     let shutdown = CancellationToken::new();
     let time = Arc::new(TokioTime::new()) as Arc<dyn Time>;
@@ -221,7 +226,24 @@ async fn run_test(
         Arc::new(TokioNetwork::new(Arc::clone(&time), shutdown.clone())) as Arc<dyn Network>;
 
     let rpm = Responsiveness::new(config.clone(), download)?;
-    let result = rpm.run_test(network, time, shutdown.clone()).await?;
+    let mut progress = rpm.subscribe();
+    let test = rpm.run_test(network, time, shutdown.clone());
+    tokio::pin!(test);
+
+    let phase = pb.message();
+    let units = FormatSizeOptions::from(DECIMAL)
+        .base_unit(BaseUnit::Bit)
+        .long_units(false)
+        .decimal_places(2);
+    let result = loop {
+        select! {
+            result = &mut test => break result?,
+            Ok(()) = progress.changed() => {
+                let goodput = progress.borrow_and_update().goodput;
+                pb.set_message(format!("{phase} ({}/s)", format_size(goodput as usize, units)));
+            }
+        }
+    };
 
     debug!("shutting down rpm test");
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
