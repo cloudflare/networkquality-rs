@@ -5,6 +5,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use crate::nq_core::{
     ConnectionType, Network, ScopedHeaders, Time, Timestamp, client::MACH_USER_AGENT,
+    connect_first_reachable,
 };
 use crate::nq_stats::TimeSeries;
 use anyhow::Context;
@@ -77,10 +78,16 @@ impl Latency {
             let time_lookup = time.now();
 
             let conn_type = ConnectionType::H1 { use_tls: true };
-            let connection = network
-                .new_connection(conn_start, addrs[0], host.to_string(), conn_type)
-                .await
-                .context("unable to create new connection")?;
+            let connection = connect_first_reachable(
+                network.as_ref(),
+                time.as_ref(),
+                conn_start,
+                &addrs,
+                host,
+                conn_type,
+            )
+            .await
+            .context("unable to create new connection")?;
             {
                 let conn = connection.write().await;
                 conn.timing().set_lookup(time_lookup);
