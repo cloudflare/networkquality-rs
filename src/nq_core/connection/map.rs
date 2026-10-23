@@ -47,7 +47,7 @@ impl ConnectionManager {
                 let stream = tls_connection(conn_type, &domain, &mut timing, io, time).await?;
                 start_h2_conn(remote_addr, domain, timing, stream, time, shutdown).await?
             }
-            ConnectionType::H3 => todo!(),
+            ConnectionType::H3 => todo!(), // add in ./src/args/mod.rs when implementing
         };
 
         let connection = Arc::new(RwLock::new(connection));
