@@ -21,7 +21,7 @@ use tracing::{Instrument, debug, error, info, trace};
 use crate::nq_core::{
     ConnectionType, EstablishedConnection, Network, OneshotResult, ScopedHeaders, Time, Timestamp,
     body::{BodyEvent, CountingBody, InflightBody, NqBody, UploadBody, empty},
-    oneshot_result,
+    connect_first_reachable, oneshot_result,
 };
 
 /// The default user agent for networkquality requests
@@ -370,10 +370,16 @@ impl ThroughputClient {
             // handshake alone, without folding in the DNS lookup time.
             let connect_start = time.now();
 
-            network
-                .new_connection(connect_start, addrs[0], host, conn_type)
-                .await
-                .context("creating new connection")?
+            connect_first_reachable(
+                network.as_ref(),
+                time.as_ref(),
+                connect_start,
+                &addrs,
+                &host,
+                conn_type,
+            )
+            .await
+            .context("creating new connection")?
         } else {
             todo!()
         };
@@ -469,10 +475,12 @@ impl Client {
 
         let host = uri.host().context("uri is missing a host")?.to_string();
 
-        let remote_addr = (host.as_str(), uri.port_u16().unwrap_or(443))
+        let remote_addrs: Vec<_> = (host.as_str(), uri.port_u16().unwrap_or(443))
             .to_socket_addrs()?
-            .next()
-            .context("could not resolve large download url")?;
+            .collect();
+        if remote_addrs.is_empty() {
+            anyhow::bail!("could not resolve large download url");
+        }
 
         let method: http::Method = self.method.as_deref().unwrap_or("GET").parse()?;
 
@@ -498,9 +506,15 @@ impl Client {
                     connection
                 } else if let Some(conn_type) = self.new_connection_type {
                     info!("creating new connection");
-                    network
-                        .new_connection(start, remote_addr, host, conn_type)
-                        .await?
+                    connect_first_reachable(
+                        network.as_ref(),
+                        time.as_ref(),
+                        start,
+                        &remote_addrs,
+                        &host,
+                        conn_type,
+                    )
+                    .await?
                 } else {
                     todo!()
                 };
