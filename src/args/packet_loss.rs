@@ -45,4 +45,7 @@ pub struct PacketLossArgs {
         default_value = "https://h3.speed.cloudflare.com/__up"
     )]
     pub upload_url: String,
+    /// Send the packets without loading the network, measuring idle packet loss.
+    #[clap(long)]
+    pub no_load: bool,
 }

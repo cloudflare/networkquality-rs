@@ -44,6 +44,9 @@ pub struct PacketLossConfig {
     pub download_url: Url,
     /// Upload URL to use for for the [`LoadGenerator`]
     pub upload_url: Url,
+    /// Whether to load the network in both directions while the packets are sent. Without load, the
+    /// test measures idle packet loss.
+    pub generate_load: bool,
     /// Headers attached only to requests whose host matches the scope's
     /// allowlist.
     pub scoped_headers: Option<ScopedHeaders>,
@@ -62,6 +65,7 @@ impl Default for PacketLossConfig {
                 .parse()
                 .unwrap(),
             upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            generate_load: true,
             scoped_headers: None,
         }
     }
@@ -142,7 +146,9 @@ impl PacketLoss {
             tokio::sync::mpsc::channel::<PacketLossEvent>(3);
 
         #[cfg(not(test))]
-        self.add_load_generators(packet_event_tx.clone(), shutdown.clone())?;
+        if self.config.generate_load {
+            self.add_load_generators(packet_event_tx.clone(), shutdown.clone())?;
+        }
 
         let mut webrtc_data_channel = WebRTCDataChannel::create_with_config(
             &self.config.turn_server_uri,
@@ -376,6 +382,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            generate_load: true,
             scoped_headers: None,
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
@@ -483,6 +490,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             upload_url: "https://h3.speed.cloudflare.com/__up".parse().unwrap(),
+            generate_load: true,
             scoped_headers: None,
         };
         let packet_loss = PacketLoss::new_with_config(config)?;
