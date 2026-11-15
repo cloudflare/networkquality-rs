@@ -77,6 +77,21 @@ fn finish_phase(pb: ProgressBar, msg: String) {
     pb.finish_with_message(msg);
 }
 
+fn throughput_message(phase: &str, throughput: Option<usize>) -> String {
+    let Some(throughput) = throughput else {
+        return format!("{phase} test");
+    };
+    let units = FormatSizeOptions::from(DECIMAL)
+        .base_unit(BaseUnit::Bit)
+        .long_units(false)
+        .decimal_places(2)
+        .decimal_zeroes(2);
+    let speed = format_size(throughput, units)
+        .replace("bits", "bps")
+        .replace("bit", "bps");
+    format!("{phase}: {speed}")
+}
+
 /// Run a responsiveness test.
 pub async fn run(cli_config: RpmArgs, show_progress: bool) -> anyhow::Result<()> {
     info!("running responsiveness test");
@@ -162,13 +177,16 @@ pub async fn run(cli_config: RpmArgs, show_progress: bool) -> anyhow::Result<()>
     info!("running download test");
     let pb = start_phase(show_progress, "Running download test");
     let download_result = run_test(&config, true, &pb).await?;
-    finish_phase(pb, "Download test".to_string());
+    finish_phase(
+        pb,
+        throughput_message("Download", download_result.throughput()),
+    );
     debug!("download result={download_result:?}");
 
     info!("running upload test");
     let pb = start_phase(show_progress, "Running upload test");
     let upload_result = run_test(&config, false, &pb).await?;
-    finish_phase(pb, "Upload test".to_string());
+    finish_phase(pb, throughput_message("Upload", upload_result.throughput()));
     debug!("upload result={upload_result:?}");
 
     warn_on_degraded_result(
