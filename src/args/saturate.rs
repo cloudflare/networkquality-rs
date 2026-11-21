@@ -25,40 +25,38 @@ pub struct SaturateArgs {
 pub enum Direction {
     /// Saturate the download (ingress) side of the network.
     Down {
-        /// The URL to upload data to.
-        #[clap(
-            short,
-            long,
-            default_value = "http://h3.speed.cloudflare.com/__down?bytes=10000000000"
-        )]
-        download_url: String,
+        /// The URL to download data from. Defaults to
+        /// `h3.speed.cloudflare.com/__down`, over `http://` for
+        /// `h1-clear-text` and `https://` otherwise.
+        #[clap(short, long)]
+        download_url: Option<String>,
     },
     /// Saturate the upload (egress) side of the network.
     Up {
-        /// The URL to upload data to.
-        #[clap(short, long, default_value = "http://h3.speed.cloudflare.com/__up")]
-        upload_url: String,
+        /// The URL to upload data to. Defaults to
+        /// `h3.speed.cloudflare.com/__up`, over `http://` for `h1-clear-text`
+        /// and `https://` otherwise.
+        #[clap(short, long)]
+        upload_url: Option<String>,
     },
     /// Saturate both the download (ingress) and upload (egress) side of the network.
     Both {
-        /// The URL to download data from.
-        #[clap(
-            short,
-            long,
-            default_value = "http://h3.speed.cloudflare.com/__down?bytes=10000000000"
-        )]
-        download_url: String,
-        /// The URL to upload data to.
-        #[clap(short, long, default_value = "http://h3.speed.cloudflare.com/__up")]
-        upload_url: String,
+        /// The URL to download data from. Defaults to
+        /// `h3.speed.cloudflare.com/__down`, over `http://` for
+        /// `h1-clear-text` and `https://` otherwise.
+        #[clap(short, long)]
+        download_url: Option<String>,
+        /// The URL to upload data to. Defaults to
+        /// `h3.speed.cloudflare.com/__up`, over `http://` for `h1-clear-text`
+        /// and `https://` otherwise.
+        #[clap(short, long)]
+        upload_url: Option<String>,
     },
 }
 
 impl Default for Direction {
     fn default() -> Self {
-        Self::Down {
-            download_url: "http://h3.speed.cloudflare.com/__down?bytes=10000000000".into(),
-        }
+        Self::Down { download_url: None }
     }
 }
 
@@ -68,18 +66,37 @@ pub(crate) struct Urls {
 }
 
 impl Direction {
-    pub(crate) fn urls(&self) -> Urls {
+    /// The URLs to use, with the default URLs matching the scheme of `conn_type`.
+    pub(crate) fn urls(&self, conn_type: &ConnType) -> Urls {
+        let scheme = match conn_type {
+            ConnType::H1ClearText => "http",
+            _ => "https",
+        };
+        let default_download =
+            || format!("{scheme}://h3.speed.cloudflare.com/__down?bytes=10000000000");
+        let default_upload = || format!("{scheme}://h3.speed.cloudflare.com/__up");
+
         match self {
-            Direction::Up { upload_url: url } | Direction::Down { download_url: url } => Urls {
-                upload: url.clone(),
-                download: url.clone(),
-            },
+            Direction::Up { upload_url } => {
+                let url = upload_url.clone().unwrap_or_else(default_upload);
+                Urls {
+                    upload: url.clone(),
+                    download: url,
+                }
+            }
+            Direction::Down { download_url } => {
+                let url = download_url.clone().unwrap_or_else(default_download);
+                Urls {
+                    upload: url.clone(),
+                    download: url,
+                }
+            }
             Direction::Both {
                 download_url,
                 upload_url,
             } => Urls {
-                download: download_url.clone(),
-                upload: upload_url.clone(),
+                download: download_url.clone().unwrap_or_else(default_download),
+                upload: upload_url.clone().unwrap_or_else(default_upload),
             },
         }
     }

@@ -21,7 +21,7 @@ use crate::util::pretty_secs;
 pub async fn run(cli_config: SaturateArgs) -> anyhow::Result<()> {
     debug!("running network saturation test with arguments {cli_config:?}");
 
-    let Urls { upload, download } = cli_config.direction.urls();
+    let Urls { upload, download } = cli_config.direction.urls(&cli_config.conn_type);
 
     let config = ResponsivenessConfig {
         large_download_url: download.parse().context("parsing download url")?,
